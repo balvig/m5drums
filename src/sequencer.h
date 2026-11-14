@@ -1,0 +1,71 @@
+// Step sequencer driving the drum kit. Timing is counted in rendered samples,
+// so it cannot drift against the audio. No Arduino, no I/O, no allocation.
+#pragma once
+#include <atomic>
+
+#include "voices.h"
+
+class Sequencer {
+ public:
+  static constexpr int kSteps = 8;
+  static constexpr int kTracks = voices::kVoiceCount;
+  static constexpr int kMinBpm = 40, kMaxBpm = 240;
+  // Swing, MPC style: the share of each pair of 16ths taken by the first one.
+  // 50 = straight, 66 = triplet feel, 75 = hard shuffle.
+  static constexpr int kMinSwing = 50, kMaxSwing = 75;
+
+  // Call once before the audio task starts. The seed picks the kit's sounds.
+  void init(uint32_t seed);
+
+  // --- Control side (UI loop). All lock-free. ---
+  void toggleStep(int track, int step) { pattern_[track].fetch_xor(1u << step); }
+  bool stepOn(int track, int step) const { return pattern_[track].load() & (1u << step); }
+
+  // Per-step automation, applied each time the step fires.
+  void setStepPitch(int track, int step, int semitones) {
+    pitch_[track][step].store(clamp(semitones, -voices::kPitchRange, voices::kPitchRange));
+  }
+  int stepPitch(int track, int step) const { return pitch_[track][step].load(); }
+  void setStepDecay(int track, int step, int level) {
+    decay_[track][step].store(clamp(level, -voices::kDecayRange, voices::kDecayRange));
+  }
+  int stepDecay(int track, int step) const { return decay_[track][step].load(); }
+
+  void setPlaying(bool on) { playRequested_.store(on); }
+  bool playing() const { return playRequested_.load(); }
+  void setTempo(int bpm) { bpm_.store(clamp(bpm, kMinBpm, kMaxBpm)); }
+  int tempo() const { return bpm_.load(); }
+  void setSwing(int percent) { swing_.store(clamp(percent, kMinSwing, kMaxSwing)); }
+  int swing() const { return swing_.load(); }
+  // Step currently sounding, or -1 when stopped.
+  int currentStep() const { return currentStep_.load(); }
+  // Plays one step's sound immediately, outside the pattern.
+  void auditionStep(int track, int step) {
+    auditionStep_[track].store(step);
+    auditions_.fetch_or(1u << track);
+  }
+
+  // --- Audio side. Renders n mono 16-bit samples. ---
+  void render(int16_t* out, size_t n);
+
+ private:
+  static int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  void triggerStep(int track, int step);
+
+  voices::DrumKit kit_;
+
+  std::atomic<uint8_t> pattern_[kTracks] = {};
+  std::atomic<int8_t> pitch_[kTracks][kSteps] = {};
+  std::atomic<int8_t> decay_[kTracks][kSteps] = {};
+  std::atomic<uint16_t> bpm_{120};
+  std::atomic<uint8_t> swing_{kMinSwing};
+  std::atomic<bool> playRequested_{false};
+  std::atomic<int8_t> currentStep_{-1};
+  std::atomic<uint32_t> auditions_{0};
+  std::atomic<uint8_t> auditionStep_[kTracks] = {};
+
+  // Audio-side state only.
+  bool running_ = false;
+  int nextStep_ = 0;
+  uint32_t samplesToNextStep_ = 0;
+};

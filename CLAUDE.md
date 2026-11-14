@@ -26,17 +26,26 @@ the exact M5Unified speaker API (read the library's own examples).
 
 ## Design
 
-- 8 steps x 3 parts: kick, snare, hi-hat
+- 8 steps (16th notes, so half a bar) x 3 parts: low, mid and high synth toms
 - Sounds are synthesised in code (virtual analog), not sample playback:
-  - kick: sine with a fast downward pitch envelope plus amplitude decay
-  - snare: noise burst plus a short tone
-  - hat: short high-passed noise
-- Screen shows a 3-row x 8-column grid, a cursor, and a moving playhead
+  - all three are the same voice at different tunings: a sine with a wide
+    downward pitch sweep ("pew") plus amplitude decay
+- Screen shows a settings ("meta") row on top, then a 3-row x 8-column grid,
+  a cursor, and a moving playhead
 - Controls:
-  - A: move cursor to next step (wraps)
-  - B: toggle the step under the cursor
-  - C: short press = next track, long press = play/stop
-- Tempo: fixed 120 BPM to start, adjustable later
+  - A: cursor left, C: cursor right. The cursor runs through the row name and
+    then the row's cells, wrapping at both ends.
+  - B short press: on a step, toggle it; on a row name, select the next row
+    (SET, LOW, MID, HI); on a setting, enter edit mode
+  - Edit mode: A/C decrease/increase (hold to repeat), B short press leaves
+  - B long press: play/stop
+  - A + C together: next grid view (TRIG, PITCH, DECAY)
+- Settings row: tempo (40-240 BPM) and swing (50-75 %, MPC style: 50 is straight)
+- Automation: every step stores a pitch offset (+/-12 semitones) and a decay
+  offset (+/-8 levels, 4 levels = double/half length). The PITCH and DECAY
+  views show them as bars; B on a step enters edit mode for that value.
+- The three voices get random tunings on every boot, each from its own
+  non-overlapping pitch band so LOW/MID/HI stay distinct
 
 ## Constraints
 
@@ -54,7 +63,7 @@ Build and flash after each one. Do not start the next until the current one
 works on the device.
 
 1. Hello: project builds, screen shows text, each button plays a beep
-2. Voices: A/B/C trigger kick/snare/hat directly
+2. Voices: A/B/C trigger the three voices directly
 3. Sequencer: grid UI, cursor, toggle steps, play/stop, playhead
 4. Tempo and per-track volume controls
 5. Recording: write the output to a 16-bit WAV file on the microSD card
