@@ -1,0 +1,16 @@
+# PlatformIO build output and downloaded libraries
+.pio/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# macOS
+.DS_Store
+
+# Recordings copied off the SD card
+*.wav
