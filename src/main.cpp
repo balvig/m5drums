@@ -593,14 +593,15 @@ void menuMove(int delta) {
   drawMenuItem(menuIndex);
 }
 
-// Empty pattern, flat automation, three new random sounds, and a random
-// tempo (80-170 BPM) and swing (50-66 %). The evolve theme stays as it is.
+// Empty pattern, flat automation, three new random sounds, a random tempo
+// (80-170 BPM) and swing (50-66 %), and evolve off.
 void newPattern() {
   seq.clearPattern();
   seq.newKit(esp_random());
   voices::familiesForSeed(seq.kitSeed(), families);
   seq.setTempo(80 + esp_random() % 91);
   seq.setSwing(50 + esp_random() % 17);
+  seq.setEvolveTheme(0);
   markDirty();
 }
 
@@ -693,6 +694,14 @@ void setup() {
   M5.BtnA.setHoldThresh(kRowHoldMs);
   M5.BtnC.setHoldThresh(kRowHoldMs);
 
+  // Red power button: one short press turns the device on, and off again.
+  // These are settings in the IP5306 power chip (I2C 0x75, register 0x01):
+  // bit 5 = on/off with one short press; bit 7 = long press instead of double
+  // press, which must stay clear (with it set, the device would not turn on
+  // from battery). The chip keeps the settings while the battery is connected.
+  M5.In_I2C.bitOff(0x75, 0x01, 0x80, 100000);
+  M5.In_I2C.bitOn(0x75, 0x01, 0x20, 100000);
+
   // Pick up where the last session left off. With nothing saved, start as
   // NEW PATTERN does.
   if (!storage::load(seq)) {
@@ -705,8 +714,9 @@ void setup() {
 
   M5.Speaker.setVolume(160);
   audio::begin(seq);
-  Serial.printf("m5drums: ready (battery %d%%, charging %d)\n", (int)M5.Power.getBatteryLevel(),
-                (int)M5.Power.isCharging());
+  Serial.printf("m5drums: ready (battery %d%%, charging %d, power reg 0x%02X)\n",
+                (int)M5.Power.getBatteryLevel(), (int)M5.Power.isCharging(),
+                M5.In_I2C.readRegister8(0x75, 0x01, 100000));
 }
 
 void loop() {

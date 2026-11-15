@@ -13,6 +13,12 @@ operated only with its three buttons and the built-in display.
 - IMU: MPU6886 (I2C 0x68) + BMM150 (I2C 0x10) on GPIO21/22
 - microSD (TF) slot, 16 GB max
 - No native USB (serial bridge only), so no USB audio
+- Red power button: set at boot to the IP5306's "one short press on/off"
+  mode (register 0x01 bit 5; the chip's default is single press on, double
+  press off). The button is also wired to the ESP32's reset line, so it
+  cannot be read by the firmware. Do not use the long-press mode (bit 7): it
+  was tried, and the device then would not turn on from battery with either
+  a press or a hold, only from USB.
 - Power chip: IP5306 over I2C. Battery level is only reported in quarters
   (25/50/75/100); `M5.Power.getBatteryLevel()` and `isCharging()` both work.
 
@@ -67,7 +73,7 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   - TEMPO (40-240 BPM) and SWING (50-75 %, MPC style: 50 is straight): B
     enters edit mode, A/C change the value, B leaves
   - NEW (select twice): empty pattern with three new random sounds
-    and a random tempo (80-170 BPM) and swing (50-66 %).
+    and a random tempo (80-170 BPM) and swing (50-66 %). Evolve goes to off.
   - EVOLVE (off, or a named theme): over a fixed 8-bar phrase the pattern
     moves away from what is set and is home again when the phrase restarts.
     The first pass is always exactly as set and stored values are never
