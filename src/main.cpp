@@ -128,6 +128,15 @@ uint16_t dimmed(uint16_t color) {
   return (r << 11) | (g << 5) | b;
 }
 
+// An RGB565 colour blended most of the way to white.
+uint16_t lightened(uint16_t color) {
+  uint16_t r = (color >> 11) & 0x1F, g = (color >> 5) & 0x3F, b = color & 0x1F;
+  r += (0x1F - r) * 2 / 3;
+  g += (0x3F - g) * 2 / 3;
+  b += (0x1F - b) * 2 / 3;
+  return (r << 11) | (g << 5) | b;
+}
+
 void markDirty() {
   dirty = true;
   dirtyAt = millis();
@@ -145,11 +154,13 @@ void drawCell(int gridRow, int step) {
   bool cursor = cursorRow == gridRow + 1 && cursorCol == step;
   uint16_t frame = cursor ? (editing ? TFT_ORANGE : TFT_WHITE) : TFT_BLACK;
   uint16_t shade = step % 4 == 0 ? kOnBeat : kOffBeat;
+  uint16_t color = tracks[track].color;
+  bool firing = on && step == shownStep;  // the playhead is on this hit right now
   M5.Display.fillRect(x, y, kCellW, kCellH, frame);
 
   if (!inDetail()) {
     M5.Display.fillRoundRect(x + 3, y + 3, kCellW - 6, kCellH - 6, 4,
-                             on ? tracks[track].color : shade);
+                             on ? (firing ? lightened(color) : color) : shade);
     return;
   }
 
@@ -157,9 +168,10 @@ void drawCell(int gridRow, int step) {
   // a dimmed tint of the drum's colour and a full-colour bar: visibly marked,
   // but not the solid block that means "toggle me" on the main screen. Steps
   // without a hit stay grey.
+  // While the hit is firing the tint goes to full colour and the bar to black.
   M5.Display.fillRoundRect(x + 3, y + 3, kCellW - 6, kCellH - 6, 4,
-                           on ? dimmed(tracks[track].color) : shade);
-  uint16_t barColor = on ? tracks[track].color : kDimText;
+                           on ? (firing ? color : dimmed(color)) : shade);
+  uint16_t barColor = on ? (firing ? TFT_BLACK : color) : kDimText;
   int mid = y + kCellH / 2;
   int len = laneValue(gridRow, track, step) * (kCellH / 2 - 5) / laneRange(gridRow);
   int barX = x + 7, barW = kCellW - 14;
@@ -269,6 +281,15 @@ void updateBattery() {
   if (state == shownBattery) return;
   shownBattery = state;
   drawBattery(level, charging);
+}
+
+// Redraws the hits in one column, so they flash as the playhead passes.
+void drawHitsInColumn(int step) {
+  // Not the columns the open menu is covering.
+  if (menuOpen && kGridX + step * kCellPitchX < kMenuX + kMenuW) return;
+  for (int r = 0; r < kGridRows; ++r) {
+    if (seq.stepOn(inDetail() ? detailTrack : r, step)) drawCell(r, step);
+  }
 }
 
 // Play/stop icon at the right end of the settings row.
@@ -697,9 +718,16 @@ void loop() {
   // The controls page covers the playhead, so it is not drawn while that is open.
   int step = seq.currentStep();
   if (!helpOpen && step != shownStep) {
-    if (shownStep >= 0) drawPlayheadMark(shownStep, false);
-    if (step >= 0) drawPlayheadMark(step, true);
-    shownStep = step;
+    int old = shownStep;
+    shownStep = step;  // drawCell reads this to decide which hits are lit
+    if (old >= 0) {
+      drawPlayheadMark(old, false);
+      drawHitsInColumn(old);
+    }
+    if (step >= 0) {
+      drawPlayheadMark(step, true);
+      drawHitsInColumn(step);
+    }
   }
 
   static uint32_t batteryCheckedAt = 0;
