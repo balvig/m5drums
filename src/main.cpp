@@ -1,38 +1,61 @@
-// Sequencer UI: settings row, view tabs, step grid, cursor, playhead.
+// Sequencer UI: settings row, step grid, per-drum detail screen, playhead.
 #include <M5Unified.h>
 
 #include "audio.h"
+#include "exporter.h"
 #include "storage.h"
 
 namespace {
 
 Sequencer seq;
 
-// --- Rows: one settings ("meta") row, then one row per track ---
+// --- Rows: one settings ("meta") row, then three grid rows ---
+// On the main screen the grid rows are the three drums. On a drum's detail
+// screen they are that drum's three automation lanes.
 constexpr int kMetaRow = 0;
-constexpr int kRows = 1 + Sequencer::kTracks;
+constexpr int kGridRows = 3;
+constexpr int kRows = 1 + kGridRows;
 
-// NEW sits in the row-name column; it starts an empty pattern with new sounds.
-enum MetaField { kFieldNew = 0, kFieldTempo = 1, kFieldSwing = 2, kMetaFields = 3 };
+// The top row has a single cell: MENU, in the row-name column. It opens a
+// drop-down list of settings and actions.
+enum MetaField { kFieldMenu = 0, kMetaFields = 1 };
 
-// What the grid shows and edits. Pressing A and C together cycles through them.
-enum View { kViewTrig = 0, kViewPitch = 1, kViewDecay = 2, kViews = 3 };
-const char* const kViewNames[kViews] = {"TRIG", "PITCH", "DECAY"};
+enum Lane { kLanePitch = 0, kLaneDecay = 1, kLaneLevel = 2, kLanes = 3 };
+const char* const kLaneLabels[kLanes] = {"PIT", "DEC", "LVL"};
+
+enum MenuItem {
+  kMenuNew = 0,
+  kMenuTempo = 1,
+  kMenuSwing = 2,
+  kMenuExport = 3,
+  kMenuControls = 4,
+  kMenuClose = 5,
+  kMenuItems = 6,
+};
+
+static_assert(Sequencer::kTracks == kGridRows && kLanes == kGridRows,
+              "the grid has one row per drum and one per lane");
 
 // --- Layout (320x240) ---
 constexpr int kLabelX = 2, kLabelW = 50;
 constexpr int kMetaY = 2, kMetaH = 30;
 constexpr int kPlayIconX = 290;
-constexpr int kTabY = 35, kTabH = 19, kTabPitchX = 88, kTabW = 84;
+constexpr int kBatteryX = 240, kBatteryW = 30, kBatteryH = 14;
+constexpr int kStripY = 35, kStripH = 19;
 constexpr int kGridX = 56, kCellPitchX = 33, kCellW = 29;
 constexpr int kGridY = 58, kCellPitchY = 47, kCellH = 42;
+constexpr int kGridW = Sequencer::kSteps * kCellPitchX - (kCellPitchX - kCellW);
 constexpr int kPlayheadY = 200, kPlayheadH = 6;
-constexpr int kHintY = 226, kHintH = 14;
+// The menu drops down from the MENU button, over the top-left of the grid.
+constexpr int kMenuX = 2, kMenuY = 34, kMenuW = 190, kMenuItemH = 26;
+constexpr int kMenuH = kMenuItems * kMenuItemH + 8;
+// The controls page covers everything below the top row.
+constexpr int kHelpY = 34, kHelpH = 240 - kHelpY;
 
 struct FieldBox {
   int x, w;
 };
-const FieldBox fieldBoxes[kMetaFields] = {{kLabelX, kLabelW}, {56, 96}, {156, 120}};
+const FieldBox fieldBoxes[kMetaFields] = {{kLabelX, kLabelW}};
 
 struct Track {
   const char* label;
@@ -49,29 +72,58 @@ const uint16_t kOnBeat = 0x39E7;   // lighter grey: steps 1 and 5, the beats
 const uint16_t kDimText = 0x7BEF;
 const uint16_t kValueText = 0xC618;
 
-constexpr uint32_t kRowHoldMs = 350;  // holding A / C this long changes row
+constexpr uint32_t kRowHoldMs = 350;    // holding A / C this long changes row
 constexpr uint32_t kSaveIdleMs = 2000;  // save this long after the last change
+constexpr uint32_t kBatteryPollMs = 5000;
 
 // --- UI state: what is currently on screen ---
 int cursorRow = 1, cursorCol = 0;
-int savedMetaCol = kFieldTempo, savedGridCol = 0;  // column to return to in each kind of row
-int view = kViewTrig;
-bool editing = false;  // adjusting the value under the cursor
-bool confirmNew = false;  // NEW was pressed once; a second press erases
+int savedMetaCol = kFieldMenu, savedGridCol = 0;  // column to return to in each kind of row
+int detailTrack = -1;     // drum whose detail screen is open, or -1 on the main screen
+bool editing = false;     // adjusting the value under the cursor
+bool menuOpen = false;
+int menuIndex = 0;
+bool menuConfirm = false;  // NEW PATTERN was chosen once; choosing it again erases
+bool menuMessage = false;  // the menu box is showing a message instead of its items
+bool helpOpen = false;     // the controls page is covering the grid
 bool dirty = false;       // changes not yet saved to flash
 uint32_t dirtyAt = 0;
 int shownStep = -1;
+int shownBattery = -1000;  // level * 2 + charging, as last drawn
 bool shownPlaying = false;
-int shownHints = -1;
 
+void drawMenuItem(int item);
+
+bool inDetail() { return detailTrack >= 0; }
 int colsInRow(int row) { return row == kMetaRow ? (int)kMetaFields : Sequencer::kSteps; }
 int rowY(int row) { return row == kMetaRow ? kMetaY : kGridY + (row - 1) * kCellPitchY; }
 int rowH(int row) { return row == kMetaRow ? kMetaH : kCellH; }
 
-// Value of a step in the current (non-TRIG) view, and that view's +/- range.
-int laneRange() { return view == kViewPitch ? voices::kPitchRange : voices::kDecayRange; }
-int laneValue(int track, int step) {
-  return view == kViewPitch ? seq.stepPitch(track, step) : seq.stepDecay(track, step);
+int laneRange(int lane) {
+  return lane == kLanePitch ? voices::kPitchRange
+                            : (lane == kLaneDecay ? voices::kDecayRange : voices::kLevelRange);
+}
+int laneValue(int lane, int track, int step) {
+  if (lane == kLanePitch) return seq.stepPitch(track, step);
+  if (lane == kLaneDecay) return seq.stepDecay(track, step);
+  return seq.stepLevel(track, step);
+}
+void setLaneValue(int lane, int track, int step, int value) {
+  if (lane == kLanePitch) {
+    seq.setStepPitch(track, step, value);
+  } else if (lane == kLaneDecay) {
+    seq.setStepDecay(track, step, value);
+  } else {
+    seq.setStepLevel(track, step, value);
+  }
+}
+
+// An RGB565 colour at about 40 % brightness.
+uint16_t dimmed(uint16_t color) {
+  uint16_t r = ((color >> 11) & 0x1F) * 2 / 5;
+  uint16_t g = ((color >> 5) & 0x3F) * 2 / 5;
+  uint16_t b = (color & 0x1F) * 2 / 5;
+  return (r << 11) | (g << 5) | b;
 }
 
 void markDirty() {
@@ -82,27 +134,32 @@ void markDirty() {
 // Everything below redraws one small region. No full-screen redraws after
 // setup(): they cause audible glitches.
 
-void drawCell(int track, int step) {
+// gridRow is 0..2: a drum on the main screen, a lane on a detail screen.
+void drawCell(int gridRow, int step) {
   int x = kGridX + step * kCellPitchX;
-  int y = rowY(track + 1);
+  int y = rowY(gridRow + 1);
+  int track = inDetail() ? detailTrack : gridRow;
   bool on = seq.stepOn(track, step);
-  bool cursor = cursorRow == track + 1 && cursorCol == step;
+  bool cursor = cursorRow == gridRow + 1 && cursorCol == step;
   uint16_t frame = cursor ? (editing ? TFT_ORANGE : TFT_WHITE) : TFT_BLACK;
   uint16_t shade = step % 4 == 0 ? kOnBeat : kOffBeat;
   M5.Display.fillRect(x, y, kCellW, kCellH, frame);
 
-  if (view == kViewTrig) {
+  if (!inDetail()) {
     M5.Display.fillRoundRect(x + 3, y + 3, kCellW - 6, kCellH - 6, 4,
                              on ? tracks[track].color : shade);
     return;
   }
 
-  // Value views: a bar growing up or down from the centre line. Coloured for
-  // steps that are on, grey for steps that are off.
-  M5.Display.fillRoundRect(x + 3, y + 3, kCellW - 6, kCellH - 6, 4, shade);
+  // Lane: a bar growing up or down from the centre line. Steps with a hit get
+  // a dimmed tint of the drum's colour and a full-colour bar: visibly marked,
+  // but not the solid block that means "toggle me" on the main screen. Steps
+  // without a hit stay grey.
+  M5.Display.fillRoundRect(x + 3, y + 3, kCellW - 6, kCellH - 6, 4,
+                           on ? dimmed(tracks[track].color) : shade);
   uint16_t barColor = on ? tracks[track].color : kDimText;
   int mid = y + kCellH / 2;
-  int len = laneValue(track, step) * (kCellH / 2 - 5) / laneRange();
+  int len = laneValue(gridRow, track, step) * (kCellH / 2 - 5) / laneRange(gridRow);
   int barX = x + 7, barW = kCellW - 14;
   if (len > 0) M5.Display.fillRect(barX, mid - len, barW, len, barColor);
   if (len < 0) M5.Display.fillRect(barX, mid, barW, -len, barColor);
@@ -112,34 +169,26 @@ void drawCell(int track, int step) {
 void drawMetaField(int field) {
   const FieldBox& box = fieldBoxes[field];
   bool cursor = cursorRow == kMetaRow && cursorCol == field;
-  bool active = cursor && (editing || (field == kFieldNew && confirmNew));
-  uint16_t bg = active ? TFT_ORANGE : TFT_BLACK;
-
-  char text[16];
-  if (field == kFieldNew) {
-    snprintf(text, sizeof(text), active ? "OK?" : "NEW");
-  } else if (field == kFieldTempo) {
-    snprintf(text, sizeof(text), "BPM %d", seq.tempo());
-  } else {
-    snprintf(text, sizeof(text), "SWING %d%%", seq.swing());
-  }
+  uint16_t bg = (cursor && menuOpen) ? TFT_ORANGE : TFT_BLACK;
 
   M5.Display.fillRect(box.x, kMetaY, box.w, kMetaH, TFT_BLACK);
   M5.Display.fillRoundRect(box.x, kMetaY, box.w, kMetaH, 4, bg);
   if (cursor) M5.Display.drawRoundRect(box.x, kMetaY, box.w, kMetaH, 4, TFT_WHITE);
   M5.Display.setTextSize(2);
   M5.Display.setTextDatum(middle_center);
-  M5.Display.setTextColor(active ? TFT_BLACK : (cursor ? TFT_WHITE : kValueText), bg);
-  M5.Display.drawString(text, box.x + box.w / 2, kMetaY + kMetaH / 2);
+  M5.Display.setTextColor(bg == TFT_ORANGE ? TFT_BLACK : (cursor ? TFT_WHITE : kValueText), bg);
+  M5.Display.drawString("MENU", box.x + box.w / 2, kMetaY + kMetaH / 2);
 }
 
-// Row name. The row the cursor is on is shown as a filled block.
+// Row name: a drum, or a lane on a detail screen. The row the cursor is on is
+// shown as a filled block.
 void drawLabel(int row) {
-  if (row == kMetaRow) return;  // that corner is the NEW button, not a name
+  if (row == kMetaRow) return;  // that corner is the MENU button, not a name
   int y = rowY(row), h = rowH(row);
   bool selected = row == cursorRow;
-  const char* text = tracks[row - 1].label;
-  uint16_t bg = selected ? tracks[row - 1].color : TFT_BLACK;
+  const char* text = inDetail() ? kLaneLabels[row - 1] : tracks[row - 1].label;
+  uint16_t color = tracks[inDetail() ? detailTrack : row - 1].color;
+  uint16_t bg = selected ? color : TFT_BLACK;
 
   M5.Display.fillRect(kLabelX, y, kLabelW, h, TFT_BLACK);
   if (selected) M5.Display.fillRoundRect(kLabelX, y + 3, kLabelW, h - 6, 4, bg);
@@ -149,35 +198,32 @@ void drawLabel(int row) {
   M5.Display.drawString(text, kLabelX + kLabelW / 2, y + h / 2);
 }
 
-// View tabs above the grid; the active one is filled.
-void drawTabs() {
-  M5.Display.setTextSize(2);
+// Strip above the grid: which drum a detail screen belongs to.
+void drawStrip() {
+  M5.Display.fillRect(kGridX, kStripY, kGridW, kStripH, TFT_BLACK);
   M5.Display.setTextDatum(middle_center);
-  for (int v = 0; v < kViews; ++v) {
-    int x = kGridX + v * kTabPitchX;
-    uint16_t bg = v == view ? TFT_ORANGE : TFT_BLACK;
-    M5.Display.fillRect(x, kTabY, kTabW, kTabH, TFT_BLACK);
-    if (v == view) M5.Display.fillRoundRect(x, kTabY, kTabW, kTabH, 4, bg);
-    M5.Display.setTextColor(v == view ? TFT_BLACK : kDimText, bg);
-    M5.Display.drawString(kViewNames[v], x + kTabW / 2, kTabY + kTabH / 2 + 1);
+  int cx = kGridX + kGridW / 2, cy = kStripY + kStripH / 2;
+  if (inDetail()) {
+    char text[10];
+    snprintf(text, sizeof(text), "DRUM %s", tracks[detailTrack].label);
+    uint16_t color = tracks[detailTrack].color;
+    M5.Display.fillRoundRect(kGridX, kStripY, kGridW, kStripH, 4, color);
+    M5.Display.setTextSize(2);
+    M5.Display.setTextColor(TFT_BLACK, color);
+    M5.Display.drawString(text, cx, cy + 1);
   }
 }
 
-// Left of the tabs: the value being edited, otherwise how to switch tabs.
-void drawTabCorner() {
-  M5.Display.fillRect(kLabelX, kTabY, kLabelW, kTabH, TFT_BLACK);
+// Left of the strip: the lane value being edited.
+void drawStripCorner() {
+  M5.Display.fillRect(kLabelX, kStripY, kLabelW, kStripH, TFT_BLACK);
+  if (!(editing && inDetail() && cursorRow != kMetaRow)) return;
+  char text[8];
+  snprintf(text, sizeof(text), "%+d", laneValue(cursorRow - 1, detailTrack, cursorCol));
+  M5.Display.setTextSize(2);
   M5.Display.setTextDatum(middle_center);
-  if (editing && cursorRow != kMetaRow) {
-    char text[8];
-    snprintf(text, sizeof(text), "%+d", laneValue(cursorRow - 1, cursorCol));
-    M5.Display.setTextSize(2);
-    M5.Display.setTextColor(TFT_ORANGE, TFT_BLACK);
-    M5.Display.drawString(text, kLabelX + kLabelW / 2, kTabY + kTabH / 2 + 1);
-  } else {
-    M5.Display.setTextSize(1);
-    M5.Display.setTextColor(kDimText, TFT_BLACK);
-    M5.Display.drawString("L+R:", kLabelX + kLabelW / 2, kTabY + kTabH / 2);
-  }
+  M5.Display.setTextColor(TFT_ORANGE, TFT_BLACK);
+  M5.Display.drawString(text, kLabelX + kLabelW / 2, kStripY + kStripH / 2 + 1);
 }
 
 // Redraws whatever sits at one cursor position.
@@ -194,6 +240,32 @@ void drawPlayheadMark(int step, bool lit) {
                       kPlayheadH, lit ? TFT_GREEN : kOffBeat);
 }
 
+// Battery icon in the top row, left of the play icon. The Gray's power chip
+// only reports the level in quarters, so the icon has four segments. Green
+// while charging; hidden if the chip cannot be read.
+void drawBattery(int level, bool charging) {
+  int y = kMetaY + (kMetaH - kBatteryH) / 2;
+  M5.Display.fillRect(kBatteryX, y, kBatteryW + 4, kBatteryH, TFT_BLACK);
+  if (level < 0) return;
+  uint16_t color = charging ? TFT_GREEN : (level <= 25 ? TFT_RED : kValueText);
+  M5.Display.drawRect(kBatteryX, y, kBatteryW, kBatteryH, color);
+  M5.Display.fillRect(kBatteryX + kBatteryW, y + 4, 3, kBatteryH - 8, color);  // terminal
+  int segments = (level + 12) / 25;
+  for (int i = 0; i < segments && i < 4; ++i) {
+    M5.Display.fillRect(kBatteryX + 3 + i * 6, y + 3, 5, kBatteryH - 6, color);
+  }
+}
+
+// Reads the battery and redraws the icon if anything changed.
+void updateBattery() {
+  int level = M5.Power.getBatteryLevel();
+  bool charging = M5.Power.isCharging();
+  int state = level * 2 + (charging ? 1 : 0);
+  if (state == shownBattery) return;
+  shownBattery = state;
+  drawBattery(level, charging);
+}
+
 // Play/stop icon at the right end of the settings row.
 void drawPlayIcon(bool playing) {
   int y = kMetaY + 7;
@@ -205,52 +277,30 @@ void drawPlayIcon(bool playing) {
   }
 }
 
-// Button hints, centred above the physical buttons. Redrawn only when what
-// the buttons do changes.
-void updateHints() {
-  static const char* const kMiddle[] = {
-      "DONE",
-      "NEW PATTERN",
-      "PRESS AGAIN: ERASE",
-      "EDIT  hold:PLAY",
-      "ON/OFF  hold:PLAY",
-      "PITCH  hold:PLAY",
-      "DECAY  hold:PLAY",
-  };
-  int hints;
-  if (editing) {
-    hints = 0;
-  } else if (cursorRow != kMetaRow) {
-    hints = 4 + view;
-  } else if (cursorCol == kFieldNew) {
-    hints = confirmNew ? 2 : 1;
-  } else {
-    hints = 3;
+void drawAllCells() {
+  for (int r = 0; r < kGridRows; ++r) {
+    for (int s = 0; s < Sequencer::kSteps; ++s) drawCell(r, s);
   }
-  if (hints == shownHints) return;
-  shownHints = hints;
+}
 
-  M5.Display.fillRect(0, kHintY, 320, kHintH, TFT_BLACK);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextDatum(bottom_center);
-  M5.Display.setTextColor(kDimText, TFT_BLACK);
-  M5.Display.drawString(editing ? "-" : "<  hold:UP", 65, 238);
-  M5.Display.drawString(kMiddle[hints], 160, 238);
-  M5.Display.drawString(editing ? "+" : "hold:DOWN  >", 255, 238);
+// Redraws everything that differs between the main and detail screens.
+void drawGridArea() {
+  for (int row = 1; row < kRows; ++row) drawLabel(row);
+  drawAllCells();
+  drawStrip();
+  drawStripCorner();
 }
 
 void moveCursor(int row, int col) {
   int oldRow = cursorRow, oldCol = cursorCol;
   cursorRow = row;
   cursorCol = col;
-  confirmNew = false;  // moving away cancels a pending NEW
   drawPosition(oldRow, oldCol);
   drawPosition(cursorRow, cursorCol);
   if (oldRow != cursorRow) {
     drawLabel(oldRow);
     drawLabel(cursorRow);
   }
-  updateHints();
 }
 
 // Left / right within the row, wrapping.
@@ -259,7 +309,7 @@ void moveCol(int delta) {
   moveCursor(cursorRow, (cursorCol + delta + cols) % cols);
 }
 
-// Up / down a row, wrapping. Track rows share a column; the settings row
+// Up / down a row, wrapping. Grid rows share a column; the settings row
 // remembers its own.
 void moveRow(int delta) {
   (cursorRow == kMetaRow ? savedMetaCol : savedGridCol) = cursorCol;
@@ -270,64 +320,247 @@ void moveRow(int delta) {
 void setEditing(bool on) {
   editing = on;
   drawPosition(cursorRow, cursorCol);
-  drawTabCorner();
-  updateHints();
+  drawStripCorner();
+}
+
+// Opens a drum's detail screen, with the cursor on the same step of its
+// first lane.
+void enterDetail(int track) {
+  detailTrack = track;
+  cursorRow = 1 + kLanePitch;
+  drawGridArea();
+}
+
+// Back to the main screen, with the cursor on the drum that was open.
+void exitDetail() {
+  editing = false;
+  bool wasOnMeta = cursorRow == kMetaRow;
+  if (wasOnMeta) {
+    savedMetaCol = cursorCol;
+    cursorCol = savedGridCol;
+  }
+  cursorRow = 1 + detailTrack;
+  detailTrack = -1;
+  if (wasOnMeta) drawMetaField(savedMetaCol);  // the cursor has left it
+  drawGridArea();
 }
 
 // Changes the value being edited. Returns false if it was already at its limit.
 bool adjustValue(int delta) {
-  if (cursorRow == kMetaRow) {
-    int before = cursorCol == kFieldTempo ? seq.tempo() : seq.swing();
-    if (cursorCol == kFieldTempo) {
+  if (menuOpen) {
+    bool tempo = menuIndex == kMenuTempo;
+    int before = tempo ? seq.tempo() : seq.swing();
+    if (tempo) {
       seq.setTempo(before + delta);
     } else {
       seq.setSwing(before + delta);
     }
-    int after = cursorCol == kFieldTempo ? seq.tempo() : seq.swing();
-    if (after == before) return false;
-    drawMetaField(cursorCol);
+    if ((tempo ? seq.tempo() : seq.swing()) == before) return false;
+    drawMenuItem(menuIndex);
     markDirty();
     return true;
   }
 
-  int track = cursorRow - 1;
-  int before = laneValue(track, cursorCol);
-  if (view == kViewPitch) {
-    seq.setStepPitch(track, cursorCol, before + delta);
-  } else {
-    seq.setStepDecay(track, cursorCol, before + delta);
-  }
-  if (laneValue(track, cursorCol) == before) return false;
-  drawCell(track, cursorCol);
-  drawTabCorner();
+  int lane = cursorRow - 1;
+  int before = laneValue(lane, detailTrack, cursorCol);
+  setLaneValue(lane, detailTrack, cursorCol, before + delta);
+  if (laneValue(lane, detailTrack, cursorCol) == before) return false;
+  drawCell(lane, cursorCol);
+  drawStripCorner();
   markDirty();
-  if (!seq.playing()) seq.auditionStep(track, cursorCol);  // hear the change
   return true;
 }
 
-void drawAllCells() {
-  for (int t = 0; t < Sequencer::kTracks; ++t) {
-    for (int s = 0; s < Sequencer::kSteps; ++s) drawCell(t, s);
+// --- Menu ---
+
+void drawMenuItem(int item) {
+  int y = kMenuY + 4 + item * kMenuItemH;
+  bool selected = item == menuIndex;
+  // Orange: a value being changed, or an erase waiting to be confirmed.
+  bool hot = selected && (editing || (item == kMenuNew && menuConfirm));
+  uint16_t bg = selected ? (hot ? TFT_ORANGE : TFT_WHITE) : TFT_BLACK;
+
+  char text[20];
+  switch (item) {
+    case kMenuTempo:
+      snprintf(text, sizeof(text), "TEMPO  %d", seq.tempo());
+      break;
+    case kMenuSwing:
+      snprintf(text, sizeof(text), "SWING  %d%%", seq.swing());
+      break;
+    case kMenuNew:
+      snprintf(text, sizeof(text), hot ? "ERASE ALL?" : "NEW PATTERN");
+      break;
+    case kMenuExport:
+      snprintf(text, sizeof(text), "EXPORT WAV");
+      break;
+    case kMenuControls:
+      snprintf(text, sizeof(text), "CONTROLS");
+      break;
+    default:
+      snprintf(text, sizeof(text), "CLOSE");
+      break;
+  }
+
+  M5.Display.fillRect(kMenuX + 4, y, kMenuW - 8, kMenuItemH - 2, bg);
+  M5.Display.setTextSize(2);
+  M5.Display.setTextDatum(middle_left);
+  M5.Display.setTextColor(selected ? TFT_BLACK : kValueText, bg);
+  M5.Display.drawString(text, kMenuX + 12, y + (kMenuItemH - 2) / 2);
+}
+
+void drawMenuBox() {
+  M5.Display.fillRect(kMenuX, kMenuY, kMenuW, kMenuH, TFT_BLACK);
+  M5.Display.drawRect(kMenuX, kMenuY, kMenuW, kMenuH, TFT_WHITE);
+}
+
+// Replaces the menu items with a two-line message; any middle press closes it.
+void showMenuMessage(const char* line1, const char* line2) {
+  menuMessage = true;
+  drawMenuBox();
+  M5.Display.setTextSize(2);
+  M5.Display.setTextDatum(middle_center);
+  M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+  M5.Display.drawString(line1, kMenuX + kMenuW / 2, kMenuY + kMenuH / 2 - 14);
+  M5.Display.setTextColor(kValueText, TFT_BLACK);
+  M5.Display.drawString(line2, kMenuX + kMenuW / 2, kMenuY + kMenuH / 2 + 14);
+  M5.Display.setTextSize(1);
+  M5.Display.setTextDatum(bottom_center);
+  M5.Display.setTextColor(kDimText, TFT_BLACK);
+  M5.Display.drawString("press M", kMenuX + kMenuW / 2, kMenuY + kMenuH - 6);
+}
+
+void openMenu() {
+  menuOpen = true;
+  menuIndex = 0;
+  menuConfirm = false;
+  menuMessage = false;
+  drawMetaField(kFieldMenu);
+  drawMenuBox();
+  for (int i = 0; i < kMenuItems; ++i) drawMenuItem(i);
+}
+
+// Removes the menu and repaints the part of the screen it covered.
+void closeMenu() {
+  menuOpen = false;
+  menuMessage = false;
+  editing = false;
+  M5.Display.fillRect(kMenuX, kMenuY, kMenuW, kMenuH, TFT_BLACK);
+  drawMetaField(kFieldMenu);
+  drawGridArea();
+}
+
+// --- Controls page ---
+
+// L, M and R are the left, middle and right buttons.
+void openHelp() {
+  struct Line {
+    const char* keys;  // nullptr marks a heading
+    const char* action;
+  };
+  static const Line kLines[] = {
+      {"L / R", "move"},
+      {"hold L / R", "up / down"},
+      {"L + R", "play / stop"},
+      {"M", "step on / off"},
+      {"hold M", "open drum"},
+      {nullptr, "IN A DRUM"},
+      {"M", "edit value"},
+      {"hold M", "back"},
+      {nullptr, "EDITING / MENU"},
+      {"L / R", "change / move"},
+      {"M", "done / select"},
+  };
+
+  menuOpen = false;
+  editing = false;
+  helpOpen = true;
+  drawMetaField(kFieldMenu);
+  M5.Display.fillRect(0, kHelpY, 320, kHelpH, TFT_BLACK);
+  M5.Display.setTextSize(2);
+  M5.Display.setTextDatum(top_left);
+  int y = kHelpY + 6;
+  for (const Line& line : kLines) {
+    if (line.keys == nullptr) {
+      M5.Display.setTextColor(TFT_ORANGE, TFT_BLACK);
+      M5.Display.drawString(line.action, 8, y);
+    } else {
+      M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+      M5.Display.drawString(line.keys, 8, y);
+      M5.Display.setTextColor(kValueText, TFT_BLACK);
+      M5.Display.drawString(line.action, 148, y);
+    }
+    y += 18;
   }
 }
 
-// Empty pattern, flat automation, three new random sounds. Tempo and swing stay.
+// Removes the controls page and repaints what it covered.
+void closeHelp() {
+  helpOpen = false;
+  M5.Display.fillRect(0, kHelpY, 320, kHelpH, TFT_BLACK);
+  drawGridArea();
+  for (int s = 0; s < Sequencer::kSteps; ++s) drawPlayheadMark(s, false);
+  shownStep = -1;  // the loop lights the current step again
+}
+
+void menuMove(int delta) {
+  if (menuMessage) return;
+  int old = menuIndex;
+  menuIndex = (menuIndex + delta + kMenuItems) % kMenuItems;
+  menuConfirm = false;  // moving away cancels a pending erase
+  drawMenuItem(old);
+  drawMenuItem(menuIndex);
+}
+
+// Empty pattern, flat automation, three new random sounds, and a random
+// tempo (80-170 BPM) and swing (50-66 %).
 void newPattern() {
-  confirmNew = false;
   seq.clearPattern();
   seq.newKit(esp_random());
-  drawAllCells();
-  drawMetaField(kFieldNew);
-  updateHints();
+  seq.setTempo(80 + esp_random() % 91);
+  seq.setSwing(50 + esp_random() % 17);
   markDirty();
 }
 
-void cycleView() {
-  if (editing) setEditing(false);
-  view = (view + 1) % kViews;
-  drawAllCells();
-  drawTabs();
-  updateHints();
+void exportPattern() {
+  showMenuMessage("EXPORTING", "please wait");
+  char name[24];
+  switch (exporter::exportWav(seq, name, sizeof(name))) {
+    case exporter::kOk:
+      showMenuMessage("SAVED", name);
+      break;
+    case exporter::kNoCard:
+      showMenuMessage("NO SD CARD", "");
+      break;
+    default:
+      showMenuMessage("WRITE FAILED", "");
+      break;
+  }
+}
+
+void menuSelect() {
+  if (menuMessage) {
+    closeMenu();
+  } else if (menuIndex == kMenuTempo || menuIndex == kMenuSwing) {
+    // Start or finish changing the value with A / C.
+    editing = !editing;
+    drawMenuItem(menuIndex);
+  } else if (menuIndex == kMenuNew) {
+    // Erasing takes two presses.
+    if (menuConfirm) {
+      newPattern();
+      closeMenu();
+    } else {
+      menuConfirm = true;
+      drawMenuItem(kMenuNew);
+    }
+  } else if (menuIndex == kMenuExport) {
+    exportPattern();
+  } else if (menuIndex == kMenuControls) {
+    openHelp();
+  } else {
+    closeMenu();
+  }
 }
 
 // True on the initial press, then repeatedly while the button stays held.
@@ -346,15 +579,11 @@ bool pressedOrRepeating(m5::Button_Class& button, uint32_t& nextRepeatAt) {
 
 void drawStaticScreen() {
   M5.Display.fillScreen(TFT_BLACK);
-  for (int row = 0; row < kRows; ++row) {
-    drawLabel(row);
-    for (int col = 0; col < colsInRow(row); ++col) drawPosition(row, col);
-  }
+  for (int col = 0; col < kMetaFields; ++col) drawMetaField(col);
   for (int s = 0; s < Sequencer::kSteps; ++s) drawPlayheadMark(s, false);
   drawPlayIcon(false);
-  drawTabs();
-  drawTabCorner();
-  updateHints();
+  updateBattery();
+  drawGridArea();
 }
 
 }  // namespace
@@ -366,14 +595,18 @@ void setup() {
   M5.BtnA.setHoldThresh(kRowHoldMs);
   M5.BtnC.setHoldThresh(kRowHoldMs);
 
-  // Pick up where the last session left off. With nothing saved, start with
-  // an empty pattern and random sounds.
-  if (!storage::load(seq)) seq.init(esp_random());
+  // Pick up where the last session left off. With nothing saved, start as
+  // NEW PATTERN does.
+  if (!storage::load(seq)) {
+    seq.init(0);
+    newPattern();
+  }
   drawStaticScreen();
 
   M5.Speaker.setVolume(160);
   audio::begin(seq);
-  Serial.println("m5drums: ready");
+  Serial.printf("m5drums: ready (battery %d%%, charging %d)\n", (int)M5.Power.getBatteryLevel(),
+                (int)M5.Power.isCharging());
 }
 
 void loop() {
@@ -382,23 +615,29 @@ void loop() {
   static bool lastAdjustChanged = false;
   M5.update();
 
-  // A + C together: next view.
+  // A + C together: play / stop.
   bool aDown = M5.BtnA.wasPressed(), cDown = M5.BtnC.wasPressed();
   if (!chordHeld && ((aDown && M5.BtnC.isPressed()) || (cDown && M5.BtnA.isPressed()))) {
     chordHeld = true;
     // While editing, the first button of the pair already changed the value
     // when it went down; take that back.
     if (editing && !(aDown && cDown) && lastAdjustChanged) adjustValue(aDown ? -1 : +1);
-    cycleView();
+    seq.setPlaying(!seq.playing());
   }
 
   if (chordHeld) {
     // Swallow everything A and C do until both are up again.
     if (!M5.BtnA.isPressed() && !M5.BtnC.isPressed()) chordHeld = false;
+  } else if (helpOpen) {
+    // Only the middle button does anything on the controls page.
   } else if (editing) {
     // A / C: decrease / increase, repeating while held
     if (pressedOrRepeating(M5.BtnA, repeatA)) lastAdjustChanged = adjustValue(-1);
     if (pressedOrRepeating(M5.BtnC, repeatC)) lastAdjustChanged = adjustValue(+1);
+  } else if (menuOpen) {
+    // A / C: up / down the menu
+    if (M5.BtnA.wasClicked()) menuMove(-1);
+    if (M5.BtnC.wasClicked()) menuMove(+1);
   } else {
     // A / C short press: left / right. Acts on release so it can be told
     // apart from a hold, which moves up / down a row.
@@ -410,29 +649,36 @@ void loop() {
 
   // B short press acts on release, so that a hold does not also trigger it.
   if (M5.BtnB.wasClicked()) {
-    if (editing) {
+    if (helpOpen) {
+      closeHelp();
+    } else if (menuOpen) {
+      menuSelect();
+    } else if (editing) {
       setEditing(false);
-    } else if (cursorRow == kMetaRow && cursorCol == kFieldNew) {
-      // Erasing takes two presses.
-      if (confirmNew) {
-        newPattern();
-      } else {
-        confirmNew = true;
-        drawMetaField(kFieldNew);
-        updateHints();
-      }
-    } else if (cursorRow == kMetaRow || view != kViewTrig) {
+    } else if (cursorRow == kMetaRow) {
+      openMenu();
+    } else if (inDetail()) {
       setEditing(true);
     } else {
-      int track = cursorRow - 1;
-      seq.toggleStep(track, cursorCol);
-      drawCell(track, cursorCol);
+      seq.toggleStep(cursorRow - 1, cursorCol);
+      drawCell(cursorRow - 1, cursorCol);
       markDirty();
     }
   }
 
-  // B hold: play/stop, from anywhere
-  if (M5.BtnB.wasHold()) seq.setPlaying(!seq.playing());
+  // B hold: close the menu; on a drum, open its detail screen; in a detail
+  // screen, go back.
+  if (M5.BtnB.wasHold()) {
+    if (helpOpen) {
+      closeHelp();
+    } else if (menuOpen) {
+      closeMenu();
+    } else if (inDetail()) {
+      exitDetail();
+    } else if (cursorRow != kMetaRow) {
+      enterDetail(cursorRow - 1);
+    }
+  }
 
   bool playing = seq.playing();
   if (playing != shownPlaying) {
@@ -440,11 +686,18 @@ void loop() {
     drawPlayIcon(playing);
   }
 
+  // The controls page covers the playhead, so it is not drawn while that is open.
   int step = seq.currentStep();
-  if (step != shownStep) {
+  if (!helpOpen && step != shownStep) {
     if (shownStep >= 0) drawPlayheadMark(shownStep, false);
     if (step >= 0) drawPlayheadMark(step, true);
     shownStep = step;
+  }
+
+  static uint32_t batteryCheckedAt = 0;
+  if (millis() - batteryCheckedAt > kBatteryPollMs) {
+    batteryCheckedAt = millis();
+    updateBattery();
   }
 
   // Save once things have been left alone for a moment.

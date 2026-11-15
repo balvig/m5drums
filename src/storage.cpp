@@ -6,7 +6,8 @@ namespace storage {
 
 namespace {
 
-constexpr uint8_t kVersion = 1;
+constexpr uint8_t kVersion = 2;
+constexpr size_t kVersion1Size = 60;  // version 1 had no per-step level
 const char* const kNamespace = "m5drums";
 const char* const kKey = "session";
 
@@ -18,20 +19,25 @@ struct Session {
   uint8_t pattern[Sequencer::kTracks];
   int8_t pitch[Sequencer::kTracks][Sequencer::kSteps];
   int8_t decay[Sequencer::kTracks][Sequencer::kSteps];
+  int8_t level[Sequencer::kTracks][Sequencer::kSteps];  // added in version 2, keep last
 };
 
 }  // namespace
 
 bool load(Sequencer& seq) {
-  Session s;
+  Session s = {};
   Preferences prefs;
   // Opened read-write: a read-only open logs an error on first boot, when the
   // namespace does not exist yet.
   if (!prefs.begin(kNamespace, false)) return false;
-  bool ok = prefs.getBytesLength(kKey) == sizeof(s) &&
-            prefs.getBytes(kKey, &s, sizeof(s)) == sizeof(s) && s.version == kVersion;
+  size_t size = prefs.getBytesLength(kKey);
+  bool ok = (size == sizeof(s) || size == kVersion1Size) &&
+            prefs.getBytes(kKey, &s, size) == size &&
+            ((s.version == kVersion && size == sizeof(s)) ||
+             (s.version == 1 && size == kVersion1Size));
   prefs.end();
   if (!ok) return false;
+  if (s.version == 1) memset(s.level, 0, sizeof(s.level));  // older save: flat levels
 
   seq.init(s.kitSeed);
   seq.setTempo(s.bpm);
@@ -41,6 +47,7 @@ bool load(Sequencer& seq) {
     for (int st = 0; st < Sequencer::kSteps; ++st) {
       seq.setStepPitch(t, st, s.pitch[t][st]);
       seq.setStepDecay(t, st, s.decay[t][st]);
+      seq.setStepLevel(t, st, s.level[t][st]);
     }
   }
   return true;
@@ -57,6 +64,7 @@ void save(const Sequencer& seq) {
     for (int st = 0; st < Sequencer::kSteps; ++st) {
       s.pitch[t][st] = seq.stepPitch(t, st);
       s.decay[t][st] = seq.stepDecay(t, st);
+      s.level[t][st] = seq.stepLevel(t, st);
     }
   }
 

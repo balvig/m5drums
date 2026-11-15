@@ -19,7 +19,7 @@ const Range kBaseHz = {60.0f, 900.0f};
 const Range kSweepRatio = {0.3f, 10.0f};  // sweep depth as a multiple of the base
 const Range kSweepSeconds = {0.008f, 0.150f};
 const Range kAmpSeconds = {0.020f, 0.350f};
-constexpr float kMaxStartHz = 6000.0f;  // keeps +12 semitones below Nyquist
+constexpr float kMaxStartHz = 6000.0f;  // keeps the top of the pitch range below Nyquist
 
 // xorshift32 mapped onto a range, evenly in ratio rather than in absolute
 // terms: an octave is as likely to be low as high.
@@ -51,11 +51,12 @@ void Tom::init(const TomParams& p) {
     ampDecays_[d + kDecayRange] = decayFor(p.ampSeconds * powf(2.0f, d / 4.0f));
   }
   ampDecay_ = ampDecays_[kDecayRange];
+  amp_ = 0;  // a new sound starts silent
 }
 
-void Tom::trigger(float pitchMul, int decayOffset) {
+void Tom::trigger(float pitchMul, int decayOffset, float level) {
   phase_ = 0;
-  amp_ = 1.0f;
+  amp_ = level;
   sweep_ = 1.0f;
   pitchMul_ = pitchMul;
   ampDecay_ = ampDecays_[decayOffset + kDecayRange];
@@ -87,10 +88,20 @@ void DrumKit::init(uint32_t seed) {
   for (int s = -kPitchRange; s <= kPitchRange; ++s) {
     pitchMuls_[s + kPitchRange] = powf(2.0f, s / 12.0f);
   }
+  for (int l = -kLevelRange; l <= kLevelRange; ++l) {
+    levelMuls_[l + kLevelRange] = powf(2.0f, l / 4.0f);
+  }
 }
 
-void DrumKit::trigger(Voice v, int pitch, int decay) {
-  toms_[v].trigger(pitchMuls_[pitch + kPitchRange], decay);
+void DrumKit::trigger(Voice v, int pitch, int decay, int level) {
+  toms_[v].trigger(pitchMuls_[pitch + kPitchRange], decay, levelMuls_[level + kLevelRange]);
+}
+
+bool DrumKit::active() const {
+  for (int v = 0; v < kVoiceCount; ++v) {
+    if (toms_[v].active()) return true;
+  }
+  return false;
 }
 
 void DrumKit::render(int16_t* out, size_t n) {

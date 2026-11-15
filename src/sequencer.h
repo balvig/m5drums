@@ -17,6 +17,10 @@ class Sequencer {
   // Call once before the audio task starts. The seed picks the kit's sounds.
   void init(uint32_t seed);
 
+  // Makes this a stopped copy of another sequencer: same sounds, pattern,
+  // automation, tempo and swing. Only for a sequencer no audio task is using.
+  void copyFrom(const Sequencer& other);
+
   // Replaces the kit's sounds with new ones picked from the seed. Takes effect
   // at the start of the next audio buffer.
   void newKit(uint32_t seed) {
@@ -43,6 +47,10 @@ class Sequencer {
     decay_[track][step].store(clamp(level, -voices::kDecayRange, voices::kDecayRange));
   }
   int stepDecay(int track, int step) const { return decay_[track][step].load(); }
+  void setStepLevel(int track, int step, int level) {
+    level_[track][step].store(clamp(level, -voices::kLevelRange, voices::kLevelRange));
+  }
+  int stepLevel(int track, int step) const { return level_[track][step].load(); }
 
   void setPlaying(bool on) { playRequested_.store(on); }
   bool playing() const { return playRequested_.load(); }
@@ -52,14 +60,15 @@ class Sequencer {
   int swing() const { return swing_.load(); }
   // Step currently sounding, or -1 when stopped.
   int currentStep() const { return currentStep_.load(); }
-  // Plays one step's sound immediately, outside the pattern.
-  void auditionStep(int track, int step) {
-    auditionStep_[track].store(step);
-    auditions_.fetch_or(1u << track);
-  }
 
-  // --- Audio side. Renders n mono 16-bit samples. ---
+  // --- Audio side ---
+  // Renders n mono 16-bit samples.
   void render(int16_t* out, size_t n);
+  // False when stopped with nothing ringing: render() would produce pure
+  // silence, so the output can be left to switch off.
+  bool hasAudio() const {
+    return playRequested_.load() || running_ || kitPending_.load() || kit_.active();
+  }
 
  private:
   static int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -72,12 +81,11 @@ class Sequencer {
   std::atomic<uint8_t> pattern_[kTracks] = {};
   std::atomic<int8_t> pitch_[kTracks][kSteps] = {};
   std::atomic<int8_t> decay_[kTracks][kSteps] = {};
+  std::atomic<int8_t> level_[kTracks][kSteps] = {};
   std::atomic<uint16_t> bpm_{120};
   std::atomic<uint8_t> swing_{kMinSwing};
   std::atomic<bool> playRequested_{false};
   std::atomic<int8_t> currentStep_{-1};
-  std::atomic<uint32_t> auditions_{0};
-  std::atomic<uint8_t> auditionStep_[kTracks] = {};
 
   // Audio-side state only.
   bool running_ = false;

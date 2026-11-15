@@ -13,9 +13,11 @@ operated only with its three buttons and the built-in display.
 - IMU: MPU6886 (I2C 0x68) + BMM150 (I2C 0x10) on GPIO21/22
 - microSD (TF) slot, 16 GB max
 - No native USB (serial bridge only), so no USB audio
+- Power chip: IP5306 over I2C. Battery level is only reported in quarters
+  (25/50/75/100); `M5.Power.getBatteryLevel()` and `isCharging()` both work.
 
-Not verified, check before relying on it: the SD card chip-select pin, and
-the exact M5Unified speaker API (read the library's own examples).
+The SD card chip-select is GPIO4 on the display's SPI bus (from M5Unified's
+pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
 
 ## Toolchain
 
@@ -30,21 +32,30 @@ the exact M5Unified speaker API (read the library's own examples).
 - Sounds are synthesised in code (virtual analog), not sample playback:
   - all three are the same voice at different, completely random tunings: a
     sine with a downward pitch sweep ("pew") plus amplitude decay
-- Screen shows a settings ("meta") row on top, then a 3-row x 8-column grid,
-  a cursor, and a moving playhead
+- Screen shows a top row (MENU button, battery icon, play state), then
+  a 3-row x 8-column grid, a cursor, and a moving playhead
 - Controls:
   - A / C short press: cursor left / right within the row, wrapping
-  - A / C long press: cursor up / down a row (settings, A, B, C), wrapping
-  - B short press: on a step, toggle it; on a setting, enter edit mode
+  - A / C long press: cursor up / down a row, wrapping
+  - A + C together: play/stop
+  - B short press: on a step, toggle it; on MENU, open the menu
+  - B long press on a drum's row: open that drum's detail screen, where the
+    three rows are its PITCH, DECAY and LEVEL lanes. B long press again: back.
+  - In the detail screen, B short press on a step edits that value
   - Edit mode: A/C decrease/increase (hold to repeat), B short press leaves
-  - B long press: play/stop
-  - A + C together: next grid view (TRIG, PITCH, DECAY), shown as tabs above the grid
-- Settings row: tempo (40-240 BPM) and swing (50-75 %, MPC style: 50 is straight)
-- Automation: every step stores a pitch offset (+/-12 semitones) and a decay
-  offset (+/-8 levels, 4 levels = double/half length). The PITCH and DECAY
-  views show them as bars; B on a step enters edit mode for that value.
-- NEW (top left, first cell of the settings row): B twice starts an empty
-  pattern with three new random sounds. Tempo and swing are kept.
+- Automation: every step stores a pitch offset (+/-18 semitones), a decay
+  offset (+/-12) and a level offset (+/-8); for decay and level, 4 =
+  double/half. The detail screen shows them as bars.
+- MENU (top left, the only cell of the top row): B opens a drop-down list.
+  A/C move up/down, B selects, B long press closes.
+  - TEMPO (40-240 BPM) and SWING (50-75 %, MPC style: 50 is straight): B
+    enters edit mode, A/C change the value, B leaves
+  - NEW PATTERN (select twice): empty pattern with three new random sounds
+    and a random tempo (80-170 BPM) and swing (50-66 %).
+  - CONTROLS: a page listing what the buttons do. Nothing about the controls
+    is shown on screen otherwise.
+  - EXPORT WAV: renders 4 repeats of the pattern plus the ring-out, offline,
+    to /drumsNNN.wav on the microSD card (16-bit mono, 44.1 kHz).
 - The session (pattern, automation, tempo, swing, and the seed the sounds are
   generated from) is saved to NVS 2 s after the last change and restored at
   boot. Changing the random ranges in voices.cpp changes what a saved seed
