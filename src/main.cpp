@@ -479,7 +479,7 @@ void drawMenuItem(int item) {
       snprintf(text, sizeof(text), "EXPORT");
       break;
     case kMenuControls:
-      snprintf(text, sizeof(text), "CONTROLS");
+      snprintf(text, sizeof(text), "HELP");
       break;
     default:
       snprintf(text, sizeof(text), "CLOSE");
@@ -785,6 +785,7 @@ void loop() {
   // Keep the menu's Bluetooth line current while it searches and connects.
   if (bluetooth::state() != shownBluetooth) {
     shownBluetooth = bluetooth::state();
+    if (shownBluetooth == bluetooth::kConnected) bluetooth::startStream();
     if (menuOpen && !menuMessage) drawMenuItem(kMenuBluetooth);
   }
 

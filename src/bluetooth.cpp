@@ -67,6 +67,11 @@ void start(Sequencer& seq) {
   source.start(fillFrames);
 }
 
+void startStream() {
+  // The library's own state machine picks up the reply and starts the stream.
+  if (currentState.load() == kConnected) esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY);
+}
+
 State state() { return (State)currentState.load(); }
 
 const char* deviceName() { return foundName; }

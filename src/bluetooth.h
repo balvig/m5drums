@@ -17,4 +17,9 @@ inline bool connected() { return state() == kConnected; }
 // Name of the device found, or "" before one is.
 const char* deviceName();
 
+// Asks for the audio stream to start now. Call once a device has connected.
+// Left alone, the library only starts it on a timer that fires every 10 s,
+// and until then nothing pulls audio, so pressing play appears to do nothing.
+void startStream();
+
 }  // namespace bluetooth

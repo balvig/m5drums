@@ -83,7 +83,7 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
     device found; while connected, the Bluetooth stack pulls audio from the
     sequencer and the built-in speaker goes quiet. Selecting it again saves
     and restarts, which is the only way to turn it off.
-  - CONTROLS: a page listing what the buttons do. Nothing about the controls
+  - HELP: a page listing what the buttons do. Nothing about the controls
     is shown on screen otherwise.
   - EXPORT: renders one evolve phrase (4 repeats of the pattern if
     evolve is off) plus the ring-out, offline,
