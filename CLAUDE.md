@@ -26,26 +26,29 @@ the exact M5Unified speaker API (read the library's own examples).
 
 ## Design
 
-- 8 steps (16th notes, so half a bar) x 3 parts: low, mid and high synth toms
+- 8 steps (16th notes, so half a bar) x 3 parts: A, B and C, all synth toms
 - Sounds are synthesised in code (virtual analog), not sample playback:
-  - all three are the same voice at different tunings: a sine with a wide
-    downward pitch sweep ("pew") plus amplitude decay
+  - all three are the same voice at different, completely random tunings: a
+    sine with a downward pitch sweep ("pew") plus amplitude decay
 - Screen shows a settings ("meta") row on top, then a 3-row x 8-column grid,
   a cursor, and a moving playhead
 - Controls:
-  - A: cursor left, C: cursor right. The cursor runs through the row name and
-    then the row's cells, wrapping at both ends.
-  - B short press: on a step, toggle it; on a row name, select the next row
-    (SET, LOW, MID, HI); on a setting, enter edit mode
+  - A / C short press: cursor left / right within the row, wrapping
+  - A / C long press: cursor up / down a row (settings, A, B, C), wrapping
+  - B short press: on a step, toggle it; on a setting, enter edit mode
   - Edit mode: A/C decrease/increase (hold to repeat), B short press leaves
   - B long press: play/stop
-  - A + C together: next grid view (TRIG, PITCH, DECAY)
+  - A + C together: next grid view (TRIG, PITCH, DECAY), shown as tabs above the grid
 - Settings row: tempo (40-240 BPM) and swing (50-75 %, MPC style: 50 is straight)
 - Automation: every step stores a pitch offset (+/-12 semitones) and a decay
   offset (+/-8 levels, 4 levels = double/half length). The PITCH and DECAY
   views show them as bars; B on a step enters edit mode for that value.
-- The three voices get random tunings on every boot, each from its own
-  non-overlapping pitch band so LOW/MID/HI stay distinct
+- NEW (top left, first cell of the settings row): B twice starts an empty
+  pattern with three new random sounds. Tempo and swing are kept.
+- The session (pattern, automation, tempo, swing, and the seed the sounds are
+  generated from) is saved to NVS 2 s after the last change and restored at
+  boot. Changing the random ranges in voices.cpp changes what a saved seed
+  sounds like.
 
 ## Constraints
 

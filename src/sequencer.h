@@ -17,9 +17,22 @@ class Sequencer {
   // Call once before the audio task starts. The seed picks the kit's sounds.
   void init(uint32_t seed);
 
+  // Replaces the kit's sounds with new ones picked from the seed. Takes effect
+  // at the start of the next audio buffer.
+  void newKit(uint32_t seed) {
+    kitSeed_.store(seed);
+    kitPending_.store(true);
+  }
+  uint32_t kitSeed() const { return kitSeed_.load(); }
+
   // --- Control side (UI loop). All lock-free. ---
   void toggleStep(int track, int step) { pattern_[track].fetch_xor(1u << step); }
   bool stepOn(int track, int step) const { return pattern_[track].load() & (1u << step); }
+  // One bit per step.
+  uint8_t pattern(int track) const { return pattern_[track].load(); }
+  void setPattern(int track, uint8_t bits) { pattern_[track].store(bits); }
+  // Turns every step off and flattens the automation.
+  void clearPattern();
 
   // Per-step automation, applied each time the step fires.
   void setStepPitch(int track, int step, int semitones) {
@@ -54,6 +67,8 @@ class Sequencer {
 
   voices::DrumKit kit_;
 
+  std::atomic<uint32_t> kitSeed_{0};
+  std::atomic<bool> kitPending_{false};
   std::atomic<uint8_t> pattern_[kTracks] = {};
   std::atomic<int8_t> pitch_[kTracks][kSteps] = {};
   std::atomic<int8_t> decay_[kTracks][kSteps] = {};

@@ -8,7 +8,7 @@ namespace voices {
 
 constexpr int kSampleRate = 44100;
 
-enum Voice : uint8_t { kTomLow = 0, kTomMid = 1, kTomHigh = 2, kVoiceCount = 3 };
+enum Voice : uint8_t { kVoiceA = 0, kVoiceB = 1, kVoiceC = 2, kVoiceCount = 3 };
 
 // Per-hit offsets, both centred on 0.
 constexpr int kPitchRange = 12;  // +/- semitones
@@ -42,8 +42,8 @@ class Tom {
 
 class DrumKit {
  public:
-  // Picks a random tuning for each voice from the seed, so every seed gives a
-  // different kit. Call once, outside the audio path.
+  // Picks a completely random tuning for each voice from the seed. The same
+  // seed always gives the same kit. No allocation or blocking.
   void init(uint32_t seed);
 
   // pitch: -kPitchRange..+kPitchRange semitones. decay: -kDecayRange..+kDecayRange.
@@ -55,8 +55,7 @@ class DrumKit {
 
  private:
   Tom toms_[kVoiceCount];
-  // The small speaker is far louder in the high voice's range, so it is pulled back.
-  float gain_[kVoiceCount] = {1.0f, 0.9f, 0.45f};
+  float gain_[kVoiceCount] = {1.0f, 1.0f, 1.0f};
   float pitchMuls_[2 * kPitchRange + 1] = {};  // one per semitone offset
 };
 

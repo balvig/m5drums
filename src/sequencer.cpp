@@ -1,12 +1,28 @@
 #include "sequencer.h"
 
-void Sequencer::init(uint32_t seed) { kit_.init(seed); }
+void Sequencer::init(uint32_t seed) {
+  kitSeed_.store(seed);
+  kit_.init(seed);
+}
+
+void Sequencer::clearPattern() {
+  for (int t = 0; t < kTracks; ++t) {
+    pattern_[t].store(0);
+    for (int s = 0; s < kSteps; ++s) {
+      pitch_[t][s].store(0);
+      decay_[t][s].store(0);
+    }
+  }
+}
 
 void Sequencer::triggerStep(int track, int step) {
   kit_.trigger((voices::Voice)track, pitch_[track][step].load(), decay_[track][step].load());
 }
 
 void Sequencer::render(int16_t* out, size_t n) {
+  // The kit belongs to the audio side, so a new one is built here.
+  if (kitPending_.exchange(false)) kit_.init(kitSeed_.load());
+
   uint32_t auditions = auditions_.exchange(0);
   for (int t = 0; t < kTracks; ++t) {
     if (auditions & (1u << t)) triggerStep(t, auditionStep_[t].load());

@@ -13,23 +13,29 @@ struct Range {
   float lo, hi;
 };
 
-// Each voice gets a random tuning from its own band. The bands do not overlap
-// in pitch, so the three stay distinct and LOW/MID/HI stay true.
-struct TomRanges {
-  Range baseHz, sweepHz, sweepSeconds, ampSeconds;
-};
-const TomRanges kTomRanges[kVoiceCount] = {
-    {{70, 160}, {200, 900}, {0.040f, 0.140f}, {0.15f, 0.35f}},     // low: deep, long
-    {{190, 400}, {600, 2200}, {0.030f, 0.090f}, {0.08f, 0.20f}},   // mid: the "pew"
-    {{480, 1100}, {1200, 3200}, {0.008f, 0.025f}, {0.02f, 0.05f}}, // high: very short blip
-};
+// Every voice draws from the same wide ranges, so any of them can be anything
+// from a deep boom to a tiny blip.
+const Range kBaseHz = {60.0f, 900.0f};
+const Range kSweepRatio = {0.3f, 10.0f};  // sweep depth as a multiple of the base
+const Range kSweepSeconds = {0.008f, 0.150f};
+const Range kAmpSeconds = {0.020f, 0.350f};
+constexpr float kMaxStartHz = 6000.0f;  // keeps +12 semitones below Nyquist
 
-// xorshift32 mapped onto a range
+// xorshift32 mapped onto a range, evenly in ratio rather than in absolute
+// terms: an octave is as likely to be low as high.
 float pick(uint32_t& rng, Range r) {
   rng ^= rng << 13;
   rng ^= rng >> 17;
   rng ^= rng << 5;
-  return r.lo + (r.hi - r.lo) * (rng >> 8) * (1.0f / 16777216.0f);
+  float u = (rng >> 8) * (1.0f / 16777216.0f);
+  return r.lo * powf(r.hi / r.lo, u);
+}
+
+// The small speaker is far louder at high pitches, so high voices are pulled
+// back: full level up to 250 Hz, falling to 0.45 at 700 Hz and above.
+float gainFor(float baseHz) {
+  float g = 1.0f - (baseHz - 250.0f) / 450.0f * 0.55f;
+  return g > 1.0f ? 1.0f : (g < 0.45f ? 0.45f : g);
 }
 
 // Per-sample multiplier that decays to 1/e in `seconds`.
@@ -69,13 +75,14 @@ float Tom::next() {
 void DrumKit::init(uint32_t seed) {
   uint32_t rng = seed | 1;  // xorshift must not start at 0
   for (int v = 0; v < kVoiceCount; ++v) {
-    const TomRanges& r = kTomRanges[v];
     TomParams p;
-    p.baseHz = pick(rng, r.baseHz);
-    p.sweepHz = pick(rng, r.sweepHz);
-    p.sweepSeconds = pick(rng, r.sweepSeconds);
-    p.ampSeconds = pick(rng, r.ampSeconds);
+    p.baseHz = pick(rng, kBaseHz);
+    p.sweepHz = p.baseHz * pick(rng, kSweepRatio);
+    if (p.baseHz + p.sweepHz > kMaxStartHz) p.sweepHz = kMaxStartHz - p.baseHz;
+    p.sweepSeconds = pick(rng, kSweepSeconds);
+    p.ampSeconds = pick(rng, kAmpSeconds);
     toms_[v].init(p);
+    gain_[v] = gainFor(p.baseHz);
   }
   for (int s = -kPitchRange; s <= kPitchRange; ++s) {
     pitchMuls_[s + kPitchRange] = powf(2.0f, s / 12.0f);
