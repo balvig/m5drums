@@ -20,8 +20,9 @@ constexpr int kRows = 1 + kGridRows;
 // drop-down list of settings and actions.
 enum MetaField { kFieldMenu = 0, kMetaFields = 1 };
 
-enum Lane { kLanePitch = 0, kLaneDecay = 1, kLaneLevel = 2, kLanes = 3 };
-const char* const kLaneLabels[kLanes] = {"PIT", "DEC", "LVL"};
+// The three per-step values. What the lanes are called, and what the third
+// one does, depends on which instrument the drum is.
+enum Lane { kLanePitch = 0, kLaneDecay = 1, kLaneShape = 2, kLanes = 3 };
 
 enum MenuItem {
   kMenuNew = 0,
@@ -88,6 +89,7 @@ bool menuMessage = false;  // the menu box is showing a message instead of its i
 bool helpOpen = false;     // the controls page is covering the grid
 bool dirty = false;       // changes not yet saved to flash
 uint32_t dirtyAt = 0;
+voices::Family families[Sequencer::kTracks];  // which instrument each drum is
 int shownStep = -1;
 int shownBattery = -1000;  // level * 2 + charging, as last drawn
 bool shownPlaying = false;
@@ -101,12 +103,12 @@ int rowH(int row) { return row == kMetaRow ? kMetaH : kCellH; }
 
 int laneRange(int lane) {
   return lane == kLanePitch ? voices::kPitchRange
-                            : (lane == kLaneDecay ? voices::kDecayRange : voices::kLevelRange);
+                            : (lane == kLaneDecay ? voices::kDecayRange : voices::kShapeRange);
 }
 int laneValue(int lane, int track, int step) {
   if (lane == kLanePitch) return seq.stepPitch(track, step);
   if (lane == kLaneDecay) return seq.stepDecay(track, step);
-  return seq.stepLevel(track, step);
+  return seq.stepShape(track, step);
 }
 void setLaneValue(int lane, int track, int step, int value) {
   if (lane == kLanePitch) {
@@ -114,7 +116,7 @@ void setLaneValue(int lane, int track, int step, int value) {
   } else if (lane == kLaneDecay) {
     seq.setStepDecay(track, step, value);
   } else {
-    seq.setStepLevel(track, step, value);
+    seq.setStepShape(track, step, value);
   }
 }
 
@@ -186,7 +188,8 @@ void drawLabel(int row) {
   if (row == kMetaRow) return;  // that corner is the MENU button, not a name
   int y = rowY(row), h = rowH(row);
   bool selected = row == cursorRow;
-  const char* text = inDetail() ? kLaneLabels[row - 1] : tracks[row - 1].label;
+  const char* text = inDetail() ? voices::laneName(families[detailTrack], row - 1)
+                                : tracks[row - 1].label;
   uint16_t color = tracks[inDetail() ? detailTrack : row - 1].color;
   uint16_t bg = selected ? color : TFT_BLACK;
 
@@ -198,14 +201,16 @@ void drawLabel(int row) {
   M5.Display.drawString(text, kLabelX + kLabelW / 2, y + h / 2);
 }
 
-// Strip above the grid: which drum a detail screen belongs to.
+// Strip above the grid: which drum a detail screen belongs to, and which
+// instrument that drum is.
 void drawStrip() {
   M5.Display.fillRect(kGridX, kStripY, kGridW, kStripH, TFT_BLACK);
   M5.Display.setTextDatum(middle_center);
   int cx = kGridX + kGridW / 2, cy = kStripY + kStripH / 2;
   if (inDetail()) {
-    char text[10];
-    snprintf(text, sizeof(text), "DRUM %s", tracks[detailTrack].label);
+    char text[16];
+    snprintf(text, sizeof(text), "%s: %s", tracks[detailTrack].label,
+             voices::familyName(families[detailTrack]));
     uint16_t color = tracks[detailTrack].color;
     M5.Display.fillRoundRect(kGridX, kStripY, kGridW, kStripH, 4, color);
     M5.Display.setTextSize(2);
@@ -517,6 +522,7 @@ void menuMove(int delta) {
 void newPattern() {
   seq.clearPattern();
   seq.newKit(esp_random());
+  voices::familiesForSeed(seq.kitSeed(), families);
   seq.setTempo(80 + esp_random() % 91);
   seq.setSwing(50 + esp_random() % 17);
   markDirty();
@@ -601,6 +607,8 @@ void setup() {
     seq.init(0);
     newPattern();
   }
+  voices::familiesForSeed(seq.kitSeed(), families);
+
   drawStaticScreen();
 
   M5.Speaker.setVolume(160);

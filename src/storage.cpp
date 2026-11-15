@@ -7,7 +7,7 @@ namespace storage {
 namespace {
 
 constexpr uint8_t kVersion = 2;
-constexpr size_t kVersion1Size = 60;  // version 1 had no per-step level
+constexpr size_t kVersion1Size = 60;  // version 1 had no third lane
 const char* const kNamespace = "m5drums";
 const char* const kKey = "session";
 
@@ -19,7 +19,7 @@ struct Session {
   uint8_t pattern[Sequencer::kTracks];
   int8_t pitch[Sequencer::kTracks][Sequencer::kSteps];
   int8_t decay[Sequencer::kTracks][Sequencer::kSteps];
-  int8_t level[Sequencer::kTracks][Sequencer::kSteps];  // added in version 2, keep last
+  int8_t shape[Sequencer::kTracks][Sequencer::kSteps];  // added in version 2, keep last
 };
 
 }  // namespace
@@ -37,7 +37,7 @@ bool load(Sequencer& seq) {
              (s.version == 1 && size == kVersion1Size));
   prefs.end();
   if (!ok) return false;
-  if (s.version == 1) memset(s.level, 0, sizeof(s.level));  // older save: flat levels
+  if (s.version == 1) memset(s.shape, 0, sizeof(s.shape));  // older save: flat third lane
 
   seq.init(s.kitSeed);
   seq.setTempo(s.bpm);
@@ -47,7 +47,7 @@ bool load(Sequencer& seq) {
     for (int st = 0; st < Sequencer::kSteps; ++st) {
       seq.setStepPitch(t, st, s.pitch[t][st]);
       seq.setStepDecay(t, st, s.decay[t][st]);
-      seq.setStepLevel(t, st, s.level[t][st]);
+      seq.setStepShape(t, st, s.shape[t][st]);
     }
   }
   return true;
@@ -64,7 +64,7 @@ void save(const Sequencer& seq) {
     for (int st = 0; st < Sequencer::kSteps; ++st) {
       s.pitch[t][st] = seq.stepPitch(t, st);
       s.decay[t][st] = seq.stepDecay(t, st);
-      s.level[t][st] = seq.stepLevel(t, st);
+      s.shape[t][st] = seq.stepShape(t, st);
     }
   }
 

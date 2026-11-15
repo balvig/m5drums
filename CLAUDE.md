@@ -28,10 +28,15 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
 
 ## Design
 
-- 8 steps (16th notes, so half a bar) x 3 parts: A, B and C, all synth toms
+- 8 steps (16th notes, so half a bar) x 3 parts: A, B and C
 - Sounds are synthesised in code (virtual analog), not sample playback:
-  - all three are the same voice at different, completely random tunings: a
-    sine with a downward pitch sweep ("pew") plus amplitude decay
+  - one voice engine (oscillator with pitch sweep + FM + filtered noise),
+    used in different proportions by four instruments: PEW (sine with a
+    falling pitch), NOISE (filtered noise over an optional tone), METAL (FM)
+    and BLIP (square or triangle with a small bend)
+  - a kit is three different instruments out of the four, each with random
+    settings. The worst-case kit renders 1 s of audio in about 140 ms.
+  - sines come from a lookup table, not sinf()
 - Screen shows a top row (MENU button, battery icon, play state), then
   a 3-row x 8-column grid, a cursor, and a moving playhead
 - Controls:
@@ -40,12 +45,14 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   - A + C together: play/stop
   - B short press: on a step, toggle it; on MENU, open the menu
   - B long press on a drum's row: open that drum's detail screen, where the
-    three rows are its PITCH, DECAY and LEVEL lanes. B long press again: back.
+    three rows are that instrument's lanes. B long press again: back.
   - In the detail screen, B short press on a step edits that value
   - Edit mode: A/C decrease/increase (hold to repeat), B short press leaves
-- Automation: every step stores a pitch offset (+/-18 semitones), a decay
-  offset (+/-12) and a level offset (+/-8); for decay and level, 4 =
-  double/half. The detail screen shows them as bars.
+- Automation: every step stores three offsets, shown as bars in the detail
+  screen. Pitch (+/-18 semitones; on NOISE it is brightness), decay (+/-12,
+  4 = double/half length), and a third "shape" lane (+/-8, 4 = double/half)
+  that is the instrument's own: PEW sweep depth, NOISE tone body, METAL FM
+  amount, BLIP bend depth.
 - MENU (top left, the only cell of the top row): B opens a drop-down list.
   A/C move up/down, B selects, B long press closes.
   - TEMPO (40-240 BPM) and SWING (50-75 %, MPC style: 50 is straight): B

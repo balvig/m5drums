@@ -47,10 +47,10 @@ class Sequencer {
     decay_[track][step].store(clamp(level, -voices::kDecayRange, voices::kDecayRange));
   }
   int stepDecay(int track, int step) const { return decay_[track][step].load(); }
-  void setStepLevel(int track, int step, int level) {
-    level_[track][step].store(clamp(level, -voices::kLevelRange, voices::kLevelRange));
+  void setStepShape(int track, int step, int shape) {
+    shape_[track][step].store(clamp(shape, -voices::kShapeRange, voices::kShapeRange));
   }
-  int stepLevel(int track, int step) const { return level_[track][step].load(); }
+  int stepShape(int track, int step) const { return shape_[track][step].load(); }
 
   void setPlaying(bool on) { playRequested_.store(on); }
   bool playing() const { return playRequested_.load(); }
@@ -81,7 +81,7 @@ class Sequencer {
   std::atomic<uint8_t> pattern_[kTracks] = {};
   std::atomic<int8_t> pitch_[kTracks][kSteps] = {};
   std::atomic<int8_t> decay_[kTracks][kSteps] = {};
-  std::atomic<int8_t> level_[kTracks][kSteps] = {};
+  std::atomic<int8_t> shape_[kTracks][kSteps] = {};
   std::atomic<uint16_t> bpm_{120};
   std::atomic<uint8_t> swing_{kMinSwing};
   std::atomic<bool> playRequested_{false};

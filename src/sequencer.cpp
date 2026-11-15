@@ -14,7 +14,7 @@ void Sequencer::copyFrom(const Sequencer& other) {
     for (int s = 0; s < kSteps; ++s) {
       setStepPitch(t, s, other.stepPitch(t, s));
       setStepDecay(t, s, other.stepDecay(t, s));
-      setStepLevel(t, s, other.stepLevel(t, s));
+      setStepShape(t, s, other.stepShape(t, s));
     }
   }
   playRequested_.store(false);
@@ -28,14 +28,14 @@ void Sequencer::clearPattern() {
     for (int s = 0; s < kSteps; ++s) {
       pitch_[t][s].store(0);
       decay_[t][s].store(0);
-      level_[t][s].store(0);
+      shape_[t][s].store(0);
     }
   }
 }
 
 void Sequencer::triggerStep(int track, int step) {
   kit_.trigger((voices::Voice)track, pitch_[track][step].load(), decay_[track][step].load(),
-               level_[track][step].load());
+               shape_[track][step].load());
 }
 
 void Sequencer::render(int16_t* out, size_t n) {
