@@ -57,11 +57,23 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   A/C move up/down, B selects, B long press closes.
   - TEMPO (40-240 BPM) and SWING (50-75 %, MPC style: 50 is straight): B
     enters edit mode, A/C change the value, B leaves
-  - NEW PATTERN (select twice): empty pattern with three new random sounds
+  - NEW (select twice): empty pattern with three new random sounds
     and a random tempo (80-170 BPM) and swing (50-66 %).
+  - EVOLVE (off, or a named theme): over a fixed 8-bar phrase the pattern
+    moves away from what is set and is home again when the phrase restarts.
+    The first pass is always exactly as set and stored values are never
+    changed. Themes are a table in sequencer.cpp: a 16-pass curve, how far
+    each lane moves, whether hits move together or each in its own
+    direction, volume spread, and chances of dropped hits, extra ghost hits
+    and rolls, plus a sample-rate crush on the output. Themes: DRIFT, BUILD,
+    WAVE, RISE, OPEN, FILL, GLITCH, MELT. There is no depth or seed to set;
+    every random-looking choice is a hash of the kit seed, pass and step,
+    so a phrase is identical every time and in exports. A row of 16
+    segments in the top row shows the position in the phrase.
   - CONTROLS: a page listing what the buttons do. Nothing about the controls
     is shown on screen otherwise.
-  - EXPORT WAV: renders 4 repeats of the pattern plus the ring-out, offline,
+  - EXPORT: renders one evolve phrase (4 repeats of the pattern if
+    evolve is off) plus the ring-out, offline,
     to /drumsNNN.wav on the microSD card (16-bit mono, 44.1 kHz).
 - The session (pattern, automation, tempo, swing, and the seed the sounds are
   generated from) is saved to NVS 2 s after the last change and restored at

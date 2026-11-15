@@ -8,7 +8,7 @@ namespace exporter {
 
 namespace {
 
-constexpr int kRepeats = 4;                               // times the 8-step pattern is played
+constexpr int kRepeats = 4;  // passes of the pattern written when evolve is off
 constexpr uint32_t kMaxTailSamples = voices::kSampleRate * 4;
 constexpr size_t kChunkSamples = 512;
 constexpr size_t kHeaderSize = 44;
@@ -64,7 +64,10 @@ Result writeFile(File& file, const Sequencer& live) {
   // The pattern is 4 pairs of 16th notes; this matches the sequencer's own
   // timing sample for sample, so the body ends exactly on the loop point.
   uint32_t pairSamples = voices::kSampleRate * 30u / live.tempo();
-  uint32_t bodySamples = kRepeats * (Sequencer::kSteps / 2) * pairSamples;
+  // With evolve on, one whole phrase: the offline copy starts at the first
+  // pass, as live playback does, and evolves identically.
+  int passes = live.evolvePasses() > 0 ? live.evolvePasses() : kRepeats;
+  uint32_t bodySamples = passes * (Sequencer::kSteps / 2) * pairSamples;
   if (!writeSamples(file, bodySamples)) return kWriteFailed;
 
   // Stop and let the last hits ring out.

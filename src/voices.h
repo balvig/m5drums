@@ -68,8 +68,9 @@ class Drum {
   // from another thread.
   void init(const DrumParams& params, uint32_t noiseSeed);
   // pitchMul scales the oscillator and the noise filters; decayOffset is
-  // -kDecayRange..+kDecayRange; shapeMul scales the instrument's own parameter.
-  void trigger(float pitchMul, int decayOffset, float shapeMul);
+  // -kDecayRange..+kDecayRange; shapeMul scales the instrument's own
+  // parameter; level is the starting amplitude (1 = normal).
+  void trigger(float pitchMul, int decayOffset, float shapeMul, float level);
   bool active() const;
   float next();
 
@@ -100,8 +101,8 @@ class DrumKit {
   void init(uint32_t seed);
 
   // pitch: -kPitchRange..+kPitchRange. decay: -kDecayRange..+kDecayRange.
-  // shape: -kShapeRange..+kShapeRange.
-  void trigger(Voice v, int pitch = 0, int decay = 0, int shape = 0);
+  // shape: -kShapeRange..+kShapeRange. level: starting amplitude, 1 = normal.
+  void trigger(Voice v, int pitch = 0, int decay = 0, int shape = 0, float level = 1.0f);
   void setVolume(Voice v, float gain) { gain_[v] = gain; }
 
   // Renders n mono 16-bit samples of all voices mixed together.

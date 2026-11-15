@@ -28,10 +28,11 @@ enum MenuItem {
   kMenuNew = 0,
   kMenuTempo = 1,
   kMenuSwing = 2,
-  kMenuExport = 3,
-  kMenuControls = 4,
-  kMenuClose = 5,
-  kMenuItems = 6,
+  kMenuEvolve = 3,  // off, or one of the named evolve themes
+  kMenuExport = 4,
+  kMenuControls = 5,
+  kMenuClose = 6,
+  kMenuItems = 7,
 };
 
 static_assert(Sequencer::kTracks == kGridRows && kLanes == kGridRows,
@@ -42,6 +43,7 @@ constexpr int kLabelX = 2, kLabelW = 50;
 constexpr int kMetaY = 2, kMetaH = 30;
 constexpr int kPlayIconX = 290;
 constexpr int kBatteryX = 240, kBatteryW = 30, kBatteryH = 14;
+constexpr int kPhraseX = 60, kPhraseW = 168, kPhraseY = 13, kPhraseH = 8;
 constexpr int kStripY = 35, kStripH = 19;
 constexpr int kGridX = 56, kCellPitchX = 33, kCellW = 29;
 constexpr int kGridY = 58, kCellPitchY = 47, kCellH = 42;
@@ -92,6 +94,7 @@ uint32_t dirtyAt = 0;
 voices::Family families[Sequencer::kTracks];  // which instrument each drum is
 int shownStep = -1;
 int shownBattery = -1000;  // level * 2 + charging, as last drawn
+int shownPhrase = -1000;   // passes * 32 + pass, as last drawn
 bool shownPlaying = false;
 
 void drawMenuItem(int item);
@@ -283,10 +286,28 @@ void updateBattery() {
   drawBattery(level, charging);
 }
 
+// Evolve phrase in the top row: one segment per pass of the pattern, the
+// current one lit. Empty when evolve is off. Redrawn only on change.
+void updatePhrase() {
+  int passes = seq.evolvePasses(), pass = seq.evolvePass();
+  int state = passes * 32 + pass;
+  if (state == shownPhrase) return;
+  shownPhrase = state;
+  M5.Display.fillRect(kPhraseX, kPhraseY, kPhraseW, kPhraseH, TFT_BLACK);
+  for (int i = 0; i < passes; ++i) {
+    int x0 = kPhraseX + kPhraseW * i / passes, x1 = kPhraseX + kPhraseW * (i + 1) / passes;
+    M5.Display.fillRect(x0, kPhraseY, x1 - x0 - 2, kPhraseH, i == pass ? TFT_WHITE : kOnBeat);
+  }
+}
+
+// True if the open menu is covering this grid column.
+bool underMenu(int step) {
+  return menuOpen && kGridX + step * kCellPitchX < kMenuX + kMenuW;
+}
+
 // Redraws the hits in one column, so they flash as the playhead passes.
 void drawHitsInColumn(int step) {
-  // Not the columns the open menu is covering.
-  if (menuOpen && kGridX + step * kCellPitchX < kMenuX + kMenuW) return;
+  if (underMenu(step)) return;
   for (int r = 0; r < kGridRows; ++r) {
     if (seq.stepOn(inDetail() ? detailTrack : r, step)) drawCell(r, step);
   }
@@ -374,14 +395,29 @@ void exitDetail() {
 // Changes the value being edited. Returns false if it was already at its limit.
 bool adjustValue(int delta) {
   if (menuOpen) {
-    bool tempo = menuIndex == kMenuTempo;
-    int before = tempo ? seq.tempo() : seq.swing();
-    if (tempo) {
-      seq.setTempo(before + delta);
-    } else {
-      seq.setSwing(before + delta);
+    bool changed = false;
+    switch (menuIndex) {
+      case kMenuTempo: {
+        int before = seq.tempo();
+        seq.setTempo(before + delta);
+        changed = seq.tempo() != before;
+        break;
+      }
+      case kMenuSwing: {
+        int before = seq.swing();
+        seq.setSwing(before + delta);
+        changed = seq.swing() != before;
+        break;
+      }
+      case kMenuEvolve: {
+        // Off, then the themes.
+        int before = seq.evolveTheme();
+        seq.setEvolveTheme(before + delta);
+        changed = seq.evolveTheme() != before;
+        break;
+      }
     }
-    if ((tempo ? seq.tempo() : seq.swing()) == before) return false;
+    if (!changed) return false;
     drawMenuItem(menuIndex);
     markDirty();
     return true;
@@ -415,10 +451,13 @@ void drawMenuItem(int item) {
       snprintf(text, sizeof(text), "SWING  %d%%", seq.swing());
       break;
     case kMenuNew:
-      snprintf(text, sizeof(text), hot ? "ERASE ALL?" : "NEW PATTERN");
+      snprintf(text, sizeof(text), hot ? "ARE YOU SURE?" : "NEW");
+      break;
+    case kMenuEvolve:
+      snprintf(text, sizeof(text), "EVOLVE  %s", Sequencer::evolveThemeName(seq.evolveTheme()));
       break;
     case kMenuExport:
-      snprintf(text, sizeof(text), "EXPORT WAV");
+      snprintf(text, sizeof(text), "EXPORT");
       break;
     case kMenuControls:
       snprintf(text, sizeof(text), "CONTROLS");
@@ -450,10 +489,6 @@ void showMenuMessage(const char* line1, const char* line2) {
   M5.Display.drawString(line1, kMenuX + kMenuW / 2, kMenuY + kMenuH / 2 - 14);
   M5.Display.setTextColor(kValueText, TFT_BLACK);
   M5.Display.drawString(line2, kMenuX + kMenuW / 2, kMenuY + kMenuH / 2 + 14);
-  M5.Display.setTextSize(1);
-  M5.Display.setTextDatum(bottom_center);
-  M5.Display.setTextColor(kDimText, TFT_BLACK);
-  M5.Display.drawString("press M", kMenuX + kMenuW / 2, kMenuY + kMenuH - 6);
 }
 
 void openMenu() {
@@ -474,6 +509,7 @@ void closeMenu() {
   M5.Display.fillRect(kMenuX, kMenuY, kMenuW, kMenuH, TFT_BLACK);
   drawMetaField(kFieldMenu);
   drawGridArea();
+  for (int s = 0; s < Sequencer::kSteps; ++s) drawPlayheadMark(s, s == shownStep);
 }
 
 // --- Controls page ---
@@ -539,7 +575,7 @@ void menuMove(int delta) {
 }
 
 // Empty pattern, flat automation, three new random sounds, and a random
-// tempo (80-170 BPM) and swing (50-66 %).
+// tempo (80-170 BPM) and swing (50-66 %). The evolve theme stays as it is.
 void newPattern() {
   seq.clearPattern();
   seq.newKit(esp_random());
@@ -568,7 +604,7 @@ void exportPattern() {
 void menuSelect() {
   if (menuMessage) {
     closeMenu();
-  } else if (menuIndex == kMenuTempo || menuIndex == kMenuSwing) {
+  } else if (menuIndex == kMenuTempo || menuIndex == kMenuSwing || menuIndex == kMenuEvolve) {
     // Start or finish changing the value with A / C.
     editing = !editing;
     drawMenuItem(menuIndex);
@@ -576,6 +612,11 @@ void menuSelect() {
     // Erasing takes two presses.
     if (menuConfirm) {
       newPattern();
+      // Land on the first step of the first drum, ready to write.
+      detailTrack = -1;
+      cursorRow = 1;
+      cursorCol = 0;
+      savedGridCol = 0;
       closeMenu();
     } else {
       menuConfirm = true;
@@ -709,6 +750,8 @@ void loop() {
     }
   }
 
+  updatePhrase();
+
   bool playing = seq.playing();
   if (playing != shownPlaying) {
     shownPlaying = playing;
@@ -721,11 +764,11 @@ void loop() {
     int old = shownStep;
     shownStep = step;  // drawCell reads this to decide which hits are lit
     if (old >= 0) {
-      drawPlayheadMark(old, false);
+      if (!underMenu(old)) drawPlayheadMark(old, false);
       drawHitsInColumn(old);
     }
     if (step >= 0) {
-      drawPlayheadMark(step, true);
+      if (!underMenu(step)) drawPlayheadMark(step, true);
       drawHitsInColumn(step);
     }
   }

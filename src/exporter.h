@@ -10,7 +10,8 @@ namespace exporter {
 
 enum Result { kOk, kNoCard, kWriteFailed };
 
-// Writes a few repeats of the pattern, then lets the last hits ring out.
+// Writes one evolve phrase (or, with evolve off, a few repeats of the
+// pattern), then lets the last hits ring out.
 // On success, name receives the file name (without the leading slash).
 // Blocks for a second or two; UI loop only.
 Result exportWav(const Sequencer& live, char* name, size_t nameSize);

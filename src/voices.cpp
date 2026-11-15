@@ -178,11 +178,11 @@ void Drum::init(const DrumParams& p, uint32_t noiseSeed) {
   hpX_ = hpY_ = lpY_ = 0;
 }
 
-void Drum::trigger(float pitchMul, int decayOffset, float shapeMul) {
+void Drum::trigger(float pitchMul, int decayOffset, float shapeMul, float level) {
   phase_ = 0;
   modPhase_ = 0;
-  amp_ = 1.0f;
-  noiseAmp_ = 1.0f;
+  amp_ = level;
+  noiseAmp_ = level;
   sweep_ = 1.0f;
   fmEnv_ = 1.0f;
   pitchMul_ = pitchMul;
@@ -283,8 +283,9 @@ void DrumKit::init(uint32_t seed) {
   }
 }
 
-void DrumKit::trigger(Voice v, int pitch, int decay, int shape) {
-  drums_[v].trigger(pitchMuls_[pitch + kPitchRange], decay, shapeMuls_[shape + kShapeRange]);
+void DrumKit::trigger(Voice v, int pitch, int decay, int shape, float level) {
+  drums_[v].trigger(pitchMuls_[pitch + kPitchRange], decay, shapeMuls_[shape + kShapeRange],
+                    level);
 }
 
 bool DrumKit::active() const {
