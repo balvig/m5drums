@@ -2,6 +2,7 @@
 #include <M5Unified.h>
 
 #include "audio.h"
+#include "bluetooth.h"
 #include "exporter.h"
 #include "storage.h"
 
@@ -29,10 +30,11 @@ enum MenuItem {
   kMenuTempo = 1,
   kMenuSwing = 2,
   kMenuEvolve = 3,  // off, or one of the named evolve themes
-  kMenuExport = 4,
-  kMenuControls = 5,
-  kMenuClose = 6,
-  kMenuItems = 7,
+  kMenuBluetooth = 4,  // experimental: play through a Bluetooth speaker
+  kMenuExport = 5,
+  kMenuControls = 6,
+  kMenuClose = 7,
+  kMenuItems = 8,
 };
 
 static_assert(Sequencer::kTracks == kGridRows && kLanes == kGridRows,
@@ -50,7 +52,7 @@ constexpr int kGridY = 58, kCellPitchY = 47, kCellH = 42;
 constexpr int kGridW = Sequencer::kSteps * kCellPitchX - (kCellPitchX - kCellW);
 constexpr int kPlayheadY = 200, kPlayheadH = 6;
 // The menu drops down from the MENU button, over the top-left of the grid.
-constexpr int kMenuX = 2, kMenuY = 34, kMenuW = 190, kMenuItemH = 26;
+constexpr int kMenuX = 2, kMenuY = 34, kMenuW = 190, kMenuItemH = 24;
 constexpr int kMenuH = kMenuItems * kMenuItemH + 8;
 // The controls page covers everything below the top row.
 constexpr int kHelpY = 34, kHelpH = 240 - kHelpY;
@@ -95,6 +97,7 @@ voices::Family families[Sequencer::kTracks];  // which instrument each drum is
 int shownStep = -1;
 int shownBattery = -1000;  // level * 2 + charging, as last drawn
 int shownPhrase = -1000;   // passes * 32 + pass, as last drawn
+int shownBluetooth = bluetooth::kOff;
 bool shownPlaying = false;
 
 void drawMenuItem(int item);
@@ -456,6 +459,22 @@ void drawMenuItem(int item) {
     case kMenuEvolve:
       snprintf(text, sizeof(text), "EVOLVE  %s", Sequencer::evolveThemeName(seq.evolveTheme()));
       break;
+    case kMenuBluetooth:
+      switch (bluetooth::state()) {
+        case bluetooth::kOff:
+          snprintf(text, sizeof(text), "BLUETOOTH  OFF");
+          break;
+        case bluetooth::kSearching:
+          snprintf(text, sizeof(text), "BT  SEARCHING");
+          break;
+        case bluetooth::kConnecting:
+          snprintf(text, sizeof(text), "BT  CONNECTING");
+          break;
+        default:
+          snprintf(text, sizeof(text), "BT  %.10s", bluetooth::deviceName());
+          break;
+      }
+      break;
     case kMenuExport:
       snprintf(text, sizeof(text), "EXPORT");
       break;
@@ -622,6 +641,17 @@ void menuSelect() {
       menuConfirm = true;
       drawMenuItem(kMenuNew);
     }
+  } else if (menuIndex == kMenuBluetooth) {
+    if (bluetooth::state() == bluetooth::kOff) {
+      bluetooth::start(seq);
+      drawMenuItem(kMenuBluetooth);
+    } else {
+      // Bluetooth cannot be shut down cleanly, so turning it off restarts.
+      showMenuMessage("RESTARTING", "");
+      storage::save(seq);
+      delay(300);
+      ESP.restart();
+    }
   } else if (menuIndex == kMenuExport) {
     exportPattern();
   } else if (menuIndex == kMenuControls) {
@@ -751,6 +781,12 @@ void loop() {
   }
 
   updatePhrase();
+
+  // Keep the menu's Bluetooth line current while it searches and connects.
+  if (bluetooth::state() != shownBluetooth) {
+    shownBluetooth = bluetooth::state();
+    if (menuOpen && !menuMessage) drawMenuItem(kMenuBluetooth);
+  }
 
   bool playing = seq.playing();
   if (playing != shownPlaying) {

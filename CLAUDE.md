@@ -22,8 +22,17 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
 ## Toolchain
 
 - PlatformIO, Arduino framework
-- `platform = espressif32`, `board = m5stack-grey` (note the spelling: grey)
+- `platform = espressif32@6.13.0` (Arduino core 2.0.17), `board = m5stack-grey`
+  (note the spelling: grey). Keep the platform pinned: unpinned, PlatformIO
+  reused an old 5.1.1 (2022) already on this machine, and with its Bluetooth
+  stack A2DP audio was only sent at about 30 % of real time.
+- PlatformIO is installed with `uv tool install platformio`; the 6.x platform
+  also needs `intelhex` in that environment
+  (`uv pip install --python ~/.local/share/uv/tools/platformio/bin/python intelhex`).
 - Library: `m5stack/M5Unified` (pulls in M5GFX). Do not use the older M5Stack library.
+- Bluetooth audio: `pschatzmann/ESP32-A2DP` pinned to v1.7.4 (no extra
+  dependencies). It takes the firmware to about 1.4 MB, hence
+  `board_build.partitions = default_16MB.csv`.
 - Build: `pio run`. Flash: `pio run -t upload`. Logs: `pio device monitor`.
 
 ## Design
@@ -70,6 +79,10 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
     every random-looking choice is a hash of the kit seed, pass and step,
     so a phrase is identical every time and in exports. A row of 16
     segments in the top row shows the position in the phrase.
+  - BLUETOOTH: turns on A2DP and connects to the first audio
+    device found; while connected, the Bluetooth stack pulls audio from the
+    sequencer and the built-in speaker goes quiet. Selecting it again saves
+    and restarts, which is the only way to turn it off.
   - CONTROLS: a page listing what the buttons do. Nothing about the controls
     is shown on screen otherwise.
   - EXPORT: renders one evolve phrase (4 repeats of the pattern if

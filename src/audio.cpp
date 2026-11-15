@@ -4,6 +4,10 @@
 
 #include <math.h>
 
+#include <atomic>
+
+#include "bluetooth.h"
+
 namespace audio {
 
 namespace {
@@ -16,6 +20,7 @@ constexpr int kSpeakerChannel = 0;
 // rendered is never one the speaker still owns.
 int16_t buffers[3][kBufferSamples];
 size_t bufferIndex = 0;
+std::atomic<bool> rendererBusy{false};
 
 // Hands a rendered buffer to the speaker and moves on to the next one.
 // Returns once the speaker has a free queue slot, which paces the audio task
@@ -56,7 +61,14 @@ void audioTask(void* arg) {
     // Stopped and silent: send nothing. With its queue empty the speaker
     // driver ramps the DAC down and switches the output off, which removes
     // the idle hiss that a stream of silent buffers would keep alive.
+    // A connected Bluetooth speaker takes over; the built-in one goes quiet.
+    if (bluetooth::connected() || !claimRenderer()) {
+      idle = true;
+      vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
+    }
     if (!seq.hasAudio()) {
+      releaseRenderer();
       idle = true;
       vTaskDelay(pdMS_TO_TICKS(5));
       continue;
@@ -67,15 +79,20 @@ void audioTask(void* arg) {
     idle = false;
 
     seq.render(buffers[bufferIndex], kBufferSamples);
+    releaseRenderer();
     sendBuffer();
   }
 }
 
 }  // namespace
 
+bool claimRenderer() { return !rendererBusy.exchange(true); }
+void releaseRenderer() { rendererBusy.store(false); }
+
 void begin(Sequencer& seq) {
-  // Core 0 is otherwise idle (no WiFi/BT); the Arduino loop runs on core 1.
-  xTaskCreatePinnedToCore(audioTask, "audio", 4096, &seq, 3, nullptr, 0);
+  // Core 1, alongside the Arduino loop, which it outranks. Core 0 is where
+  // the Bluetooth stack runs when that is on, and it would starve this task.
+  xTaskCreatePinnedToCore(audioTask, "audio", 4096, &seq, 3, nullptr, 1);
 }
 
 }  // namespace audio
