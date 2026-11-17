@@ -1,9 +1,13 @@
 // Sequencer UI: settings row, step grid, per-drum detail screen, playhead.
 #include <M5Unified.h>
 
+#include <sys/time.h>
+#include <time.h>
+
 #include "audio.h"
 #include "bluetooth.h"
 #include "exporter.h"
+#include "lineout.h"
 #include "storage.h"
 
 namespace {
@@ -77,7 +81,11 @@ const uint16_t kOnBeat = 0x39E7;   // lighter grey: steps 1 and 5, the beats
 const uint16_t kDimText = 0x7BEF;
 const uint16_t kValueText = 0xC618;
 
-constexpr uint32_t kRowHoldMs = 350;    // holding A / C this long changes row
+constexpr uint32_t kBackHoldMs = 400;      // holding A alone this long means "back / open drum"
+constexpr uint32_t kPlayHoldMs = 450;      // holding A and C together this long is play / stop
+constexpr uint32_t kPairGraceMs = 45;      // how long a press waits for the other button to join it
+constexpr uint32_t kValueRepeatMs = 50;    // repeat rate when a held button changes a value
+constexpr uint32_t kCursorRepeatMs = 120;  // repeat rate when a held button moves the cursor
 constexpr uint32_t kSaveIdleMs = 2000;  // save this long after the last change
 constexpr uint32_t kBatteryPollMs = 5000;
 
@@ -540,18 +548,24 @@ void openHelp() {
     const char* action;
   };
   static const Line kLines[] = {
-      {"L / R", "move"},
-      {"hold L / R", "up / down"},
-      {"L + R", "play / stop"},
-      {"M", "step on / off"},
-      {"hold M", "open drum"},
+      {"L / R", "left / right"},
+      {"M", "enter: step on/off"},
+      {"hold L, R", "row down"},
+      {"hold R, L", "row up"},
+      {"hold L + R", "play / stop"},
+      {"hold M", "open drum / back"},
       {nullptr, "IN A DRUM"},
-      {"M", "edit value"},
-      {"hold M", "back"},
-      {nullptr, "EDITING / MENU"},
-      {"L / R", "change / move"},
-      {"M", "done / select"},
+      {"M", "edit value, done"},
+      {"L / R", "lower / raise"},
+      {nullptr, "MENU: L / R, M"},
   };
+
+
+
+
+
+
+
 
   menuOpen = false;
   editing = false;
@@ -663,17 +677,34 @@ void menuSelect() {
 }
 
 // True on the initial press, then repeatedly while the button stays held.
-bool pressedOrRepeating(m5::Button_Class& button, uint32_t& nextRepeatAt) {
+bool pressedOrRepeating(m5::Button_Class& button, uint32_t& nextRepeatAt, uint32_t intervalMs) {
   uint32_t now = millis();
   if (button.wasPressed()) {
     nextRepeatAt = now + 400;
     return true;
   }
   if (button.isPressed() && (int32_t)(now - nextRepeatAt) >= 0) {
-    nextRepeatAt = now + 50;
+    nextRepeatAt = now + intervalMs;
     return true;
   }
   return false;
+}
+
+// The Gray has no clock, so exported files would be stamped 1 Jan 1980.
+// Start the system clock at the moment this firmware was built instead: not
+// the real time, but a plausible date, and later exports sort after earlier
+// ones within a session.
+void setClockFromBuildTime() {
+  static const char kMonths[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  char month[4] = "";
+  struct tm t = {};
+  sscanf(__DATE__, "%3s %d %d", month, &t.tm_mday, &t.tm_year);
+  sscanf(__TIME__, "%d:%d:%d", &t.tm_hour, &t.tm_min, &t.tm_sec);
+  const char* found = strstr(kMonths, month);
+  t.tm_mon = found ? (found - kMonths) / 3 : 0;
+  t.tm_year -= 1900;
+  struct timeval now = {mktime(&t), 0};
+  settimeofday(&now, nullptr);
 }
 
 void drawStaticScreen() {
@@ -691,8 +722,7 @@ void setup() {
   auto cfg = M5.config();
   cfg.serial_baudrate = 115200;  // 0 (the default) leaves Serial off
   M5.begin(cfg);
-  M5.BtnA.setHoldThresh(kRowHoldMs);
-  M5.BtnC.setHoldThresh(kRowHoldMs);
+  setClockFromBuildTime();
 
   // Red power button: one short press turns the device on, and off again.
   // These are settings in the IP5306 power chip (I2C 0x75, register 0x01):
@@ -713,84 +743,199 @@ void setup() {
   drawStaticScreen();
 
   M5.Speaker.setVolume(160);
+  // TEMPORARY: which chips are on the I2C bus, to tell the Gray from a Basic
+  // and see whether the audio module is fitted.
+  Serial.print("i2c:");
+  for (int addr = 8; addr < 120; ++addr) {
+    if (M5.In_I2C.scanID(addr)) Serial.printf(" 0x%02X", addr);
+  }
+  Serial.println();
+  if (!lineout::begin()) Serial.println("lineout: no audio module");
   audio::begin(seq);
   Serial.printf("m5drums: ready (battery %d%%, charging %d, power reg 0x%02X)\n",
                 (int)M5.Power.getBatteryLevel(), (int)M5.Power.isCharging(),
                 M5.In_I2C.readRegister8(0x75, 0x01, 100000));
 }
 
-void loop() {
-  static uint32_t repeatA = 0, repeatC = 0;
-  static bool chordHeld = false;
-  static bool lastAdjustChanged = false;
-  M5.update();
-
-  // A + C together: play / stop.
-  bool aDown = M5.BtnA.wasPressed(), cDown = M5.BtnC.wasPressed();
-  if (!chordHeld && ((aDown && M5.BtnC.isPressed()) || (cDown && M5.BtnA.isPressed()))) {
-    chordHeld = true;
-    // While editing, the first button of the pair already changed the value
-    // when it went down; take that back.
-    if (editing && !(aDown && cDown) && lastAdjustChanged) adjustValue(aDown ? -1 : +1);
-    seq.setPlaying(!seq.playing());
-  }
-
-  if (chordHeld) {
-    // Swallow everything A and C do until both are up again.
-    if (!M5.BtnA.isPressed() && !M5.BtnC.isPressed()) chordHeld = false;
-  } else if (helpOpen) {
-    // Only the middle button does anything on the controls page.
-  } else if (editing) {
-    // A / C: decrease / increase, repeating while held
-    if (pressedOrRepeating(M5.BtnA, repeatA)) lastAdjustChanged = adjustValue(-1);
-    if (pressedOrRepeating(M5.BtnC, repeatC)) lastAdjustChanged = adjustValue(+1);
+// The shift button's short press: "enter" on whatever the cursor is on.
+void pressEnter() {
+  if (helpOpen) {
+    closeHelp();
   } else if (menuOpen) {
-    // A / C: up / down the menu
-    if (M5.BtnA.wasClicked()) menuMove(-1);
-    if (M5.BtnC.wasClicked()) menuMove(+1);
+    menuSelect();
+  } else if (editing) {
+    setEditing(false);
+  } else if (cursorRow == kMetaRow) {
+    openMenu();
+  } else if (inDetail()) {
+    setEditing(true);
   } else {
-    // A / C short press: left / right. Acts on release so it can be told
-    // apart from a hold, which moves up / down a row.
-    if (M5.BtnA.wasClicked()) moveCol(-1);
-    if (M5.BtnC.wasClicked()) moveCol(+1);
-    if (M5.BtnA.wasHold()) moveRow(-1);
-    if (M5.BtnC.wasHold()) moveRow(+1);
+    seq.toggleStep(cursorRow - 1, cursorCol);
+    drawCell(cursorRow - 1, cursorCol);
+    markDirty();
+  }
+}
+
+// The shift button held on its own: open the drum under the cursor, or go
+// back out of wherever we are.
+void pressBack() {
+  if (helpOpen) {
+    closeHelp();
+  } else if (menuOpen) {
+    closeMenu();
+  } else if (inDetail()) {
+    exitDetail();
+  } else if (cursorRow != kMetaRow) {
+    enterDetail(cursorRow - 1);
+  }
+}
+
+// What the left (-1) or right (+1) move button does on its own. Returns false
+// if nothing changed.
+bool nudge(int delta) {
+  if (helpOpen) return false;
+  if (editing) return adjustValue(delta);
+  if (menuOpen) {
+    menuMove(delta);
+  } else {
+    moveCol(delta);
+  }
+  return true;
+}
+
+// A, B and C are the left, middle and right buttons on the device.
+//   A  move left               (while C is held: up a row)
+//   C  move right              (while A is held: down a row)
+//   A and C both held for a moment: play / stop
+//   B  tapped: enter
+//      held on its own for a moment: back / open drum
+// On the grid, A and C move the cursor when released, and never while held,
+// because a held button is the shift for the other one. In the menu and
+// while editing a value they act on press (after a few hundredths of a
+// second, so a pair pressed together is seen first) and repeat while held.
+
+// One of the two outer buttons, and what its current press has become.
+struct MoveButton {
+  m5::Button_Class* button;
+  int direction;  // -1 left, +1 right
+  enum {
+    kIdle,
+    kPending,   // just pressed: waiting a moment to see if the other button joins it
+    kMoving,    // moving the cursor sideways, repeating
+    kHolding,   // the held half of a pair; does nothing more on its own
+    kRowPress,  // the second half of a pair: a row move if let go, play / stop if held
+  } mode;
+  int moves;  // sideways steps this press has made, to take back if needed
+  bool repeats;  // this press began in the menu or while editing a value
+  uint32_t pressedAt;
+  uint32_t repeatAt;
+
+  // Takes back this press's sideways steps; the press does nothing more on its own.
+  void becomeHolder() {
+    if (mode == kMoving) {
+      for (; moves > 0; --moves) nudge(-direction);
+    }
+    mode = kHolding;
+  }
+};
+
+void handleButtons() {
+  static MoveButton left = {&M5.BtnA, -1, MoveButton::kIdle, 0, false, 0, 0};
+  static MoveButton right = {&M5.BtnC, +1, MoveButton::kIdle, 0, false, 0, 0};
+  m5::Button_Class& enterBtn = M5.BtnB;
+  static bool backDone = false;   // this hold of enter has already done "back / open drum"
+  static uint32_t enterPressedAt = 0;
+
+  bool onGrid = !editing && !menuOpen && !helpOpen;
+  uint32_t now = millis();
+
+  if (enterBtn.wasPressed()) {
+    backDone = false;
+    enterPressedAt = now;
   }
 
-  // B short press acts on release, so that a hold does not also trigger it.
-  if (M5.BtnB.wasClicked()) {
-    if (helpOpen) {
-      closeHelp();
-    } else if (menuOpen) {
-      menuSelect();
-    } else if (editing) {
-      setEditing(false);
-    } else if (cursorRow == kMetaRow) {
-      openMenu();
-    } else if (inDetail()) {
-      setEditing(true);
-    } else {
-      seq.toggleStep(cursorRow - 1, cursorCol);
-      drawCell(cursorRow - 1, cursorCol);
-      markDirty();
+  for (MoveButton* b : {&left, &right}) {
+    MoveButton* other = b == &left ? &right : &left;
+    bool down = b->button->isPressed();
+
+    if (b->button->wasPressed()) {
+      b->moves = 0;
+      b->pressedAt = now;
+      b->repeats = !onGrid;
+      if (other->button->isPressed()) {
+        // Landing on the other outer button: the pair is a row move if let
+        // go quickly, play / stop if kept down. Nothing shows until it is
+        // known which.
+        other->becomeHolder();
+        b->mode = MoveButton::kRowPress;
+      } else {
+        b->mode = MoveButton::kPending;
+      }
+      continue;
+    }
+
+    switch (b->mode) {
+      case MoveButton::kPending:
+        if (!b->repeats) {
+          // On the grid a held button is a shift for the other one, so it
+          // never moves the cursor while down: the step happens on release.
+          if (!down) {
+            nudge(b->direction);
+            b->mode = MoveButton::kIdle;
+          }
+        } else if (!down || now - b->pressedAt >= kPairGraceMs) {
+          // In the menu and while editing: act once the other button has had
+          // its chance to join, then repeat while held.
+          if (nudge(b->direction)) ++b->moves;
+          b->mode = down ? MoveButton::kMoving : MoveButton::kIdle;
+          b->repeatAt = b->pressedAt + 400;
+        }
+        break;
+
+      case MoveButton::kMoving:
+        if (!down) {
+          b->mode = MoveButton::kIdle;
+        } else if ((int32_t)(now - b->repeatAt) >= 0) {
+          b->repeatAt = now + (editing ? kValueRepeatMs : kCursorRepeatMs);
+          if (nudge(b->direction)) ++b->moves;
+        }
+        break;
+
+      case MoveButton::kRowPress:
+        if (down && other->button->isPressed()) {
+          if (now - b->pressedAt >= kPlayHoldMs) {
+            // Both kept down: play / stop.
+            b->mode = MoveButton::kHolding;
+            seq.setPlaying(!seq.playing());
+          }
+        } else {
+          // One of the pair let go first: a row move. Holding left and
+          // pressing right goes down; the reverse goes up.
+          if (onGrid) moveRow(b->direction);
+          b->mode = down ? MoveButton::kHolding : MoveButton::kIdle;
+        }
+        break;
+
+      default:
+        if (!down) b->mode = MoveButton::kIdle;
+        break;
     }
   }
 
-  // B hold: close the menu; on a drum, open its detail screen; in a detail
-  // screen, go back.
-  if (M5.BtnB.wasHold()) {
-    if (helpOpen) {
-      closeHelp();
-    } else if (menuOpen) {
-      closeMenu();
-    } else if (inDetail()) {
-      exitDetail();
-    } else if (cursorRow != kMetaRow) {
-      enterDetail(cursorRow - 1);
-    }
+  // Enter: enter on a tap; back / open drum once held on its own a moment.
+  if (enterBtn.isPressed() && !backDone && now - enterPressedAt >= kBackHoldMs) {
+    backDone = true;
+    pressBack();
   }
+  if (enterBtn.wasReleased() && !backDone) pressEnter();
+}
+
+void loop() {
+  M5.update();
+  handleButtons();
 
   updatePhrase();
+  lineout::poll();
 
   // Keep the menu's Bluetooth line current while it searches and connects.
   if (bluetooth::state() != shownBluetooth) {

@@ -54,15 +54,26 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   - sines come from a lookup table, not sinf()
 - Screen shows a top row (MENU button, battery icon, play state), then
   a 3-row x 8-column grid, a cursor, and a moving playhead
-- Controls:
-  - A / C short press: cursor left / right within the row, wrapping
-  - A / C long press: cursor up / down a row, wrapping
-  - A + C together: play/stop
-  - B short press: on a step, toggle it; on MENU, open the menu
-  - B long press on a drum's row: open that drum's detail screen, where the
-    three rows are that instrument's lanes. B long press again: back.
-  - In the detail screen, B short press on a step edits that value
-  - Edit mode: A/C decrease/increase (hold to repeat), B short press leaves
+- Controls (A, B, C are the left, middle and right buttons):
+  - A / C tapped: cursor left / right within the row, wrapping. On the grid
+    they act on release and do nothing while held, because a held button is
+    the shift for the other. In the menu (up / down) and while editing a
+    value (lower / raise) they act on press and repeat while held.
+  - A held, then C pressed and let go: down a row. C held, then A pressed
+    and let go: up a row. Wrapping (MENU, then the three drums or lanes).
+    The row changes when either button is released.
+  - A and C both held for 0.45 s: play/stop, with no cursor movement.
+  - In the menu and while editing, a press of A or C waits 45 ms before
+    acting, so that a pair pressed together (play/stop) is recognised first.
+  - B tapped: "enter". On a step, toggle it; on MENU, open the menu; in a
+    drum's detail screen, start or finish editing the value; in the menu,
+    select.
+  - B held on its own for 0.4 s (fires while still held): on a drum's row,
+    open that drum's detail screen, where the three rows are that
+    instrument's lanes; otherwise go back (out of the detail screen, menu or
+    help)
+  - Other arrangements tried along the way: one button as both enter and
+    shift (on A, on B, and on C); A as a row-shift for B and C.
 - Automation: every step stores three offsets, shown as bars in the detail
   screen. Pitch (+/-18 semitones; on NOISE it is brightness), decay (+/-12,
   4 = double/half length), and a third "shape" lane (+/-8, 4 = double/half)

@@ -7,6 +7,7 @@
 #include <atomic>
 
 #include "bluetooth.h"
+#include "lineout.h"
 
 namespace audio {
 
@@ -71,6 +72,16 @@ void audioTask(void* arg) {
       releaseRenderer();
       idle = true;
       vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
+    }
+
+    // Something plugged into the audio module's jack: play there instead of
+    // the built-in speaker. The codec needs none of the DAC's coaxing.
+    if (lineout::active()) {
+      idle = true;  // so the speaker is primed again when it takes back over
+      seq.render(buffers[0], kBufferSamples);
+      releaseRenderer();
+      lineout::write(buffers[0], kBufferSamples);
       continue;
     }
 
