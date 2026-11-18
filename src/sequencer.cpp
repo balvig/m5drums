@@ -196,9 +196,6 @@ void Sequencer::crush(int16_t* out, size_t n) {
 }
 
 void Sequencer::render(int16_t* out, size_t n) {
-  int16_t* const start = out;
-  const size_t total = n;
-
   // The kit belongs to the audio side, so a new one is built here.
   if (kitPending_.exchange(false)) kit_.init(kitSeed_.load());
 
@@ -242,6 +239,9 @@ void Sequencer::render(int16_t* out, size_t n) {
       if (rollLeft_[t] && rollCountdown_[t] < chunk) chunk = rollCountdown_[t];
     }
     kit_.render(out, chunk);
+    // Per chunk, not per buffer, so the crush changes exactly on the step
+    // where the theme's amount does.
+    crush(out, chunk);
     out += chunk;
     n -= chunk;
     for (int t = 0; t < kTracks; ++t) {
@@ -256,6 +256,4 @@ void Sequencer::render(int16_t* out, size_t n) {
     }
     if (running_) samplesToNextStep_ -= chunk;
   }
-
-  crush(start, total);
 }

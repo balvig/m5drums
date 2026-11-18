@@ -40,6 +40,12 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   dependencies). It takes the firmware to about 1.4 MB, hence
   `board_build.partitions = default_16MB.csv`.
 - Build: `pio run`. Flash: `pio run -t upload`. Logs: `pio device monitor`.
+- Tests: `pio test -e native`. They build voices.cpp, sequencer.cpp and
+  storage.cpp for this computer (no device needed) and take a few seconds.
+  Suites are in `test/test_*`; `test/support` has shared helpers and an
+  in-memory stand-in for the ESP32's `Preferences.h`. Run them after any
+  change to those three files. Anything that touches hardware (buttons,
+  display, audio outputs, Bluetooth, SD export) is only checked on the device.
 
 ## Design
 
