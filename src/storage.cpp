@@ -9,7 +9,7 @@ namespace {
 // Bump this whenever the Session layout or the meaning of a kit seed changes.
 // A save with any other version is ignored and the device starts fresh;
 // older saves are deliberately not converted.
-constexpr uint8_t kVersion = 7;
+constexpr uint8_t kVersion = 8;
 const char* const kNamespace = "m5drums";
 const char* const kKey = "session";
 

@@ -228,9 +228,8 @@ void test_new_kit_changes_the_sound() {
     writePattern(*s);
     s->setPlaying(true);
   }
-  // + 2: the generator ignores a seed's lowest bit, so n and n + 1 can be the same kit.
-  b->newKit(kSeed + 2);
-  TEST_ASSERT_EQUAL_UINT32(kSeed + 2, b->kitSeed());
+  b->newKit(kSeed + 1);
+  TEST_ASSERT_EQUAL_UINT32(kSeed + 1, b->kitSeed());
   TEST_ASSERT_TRUE(firstDifference(renderSamples(*a, kRate), renderSamples(*b, kRate)) >= 0);
 }
 

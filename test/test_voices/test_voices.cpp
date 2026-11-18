@@ -155,6 +155,23 @@ void test_different_seeds_give_different_sounds() {
   TEST_ASSERT_FALSE(renderUntilSilent(*a) == renderUntilSilent(*b));
 }
 
+// Every seed is its own kit, including seeds that differ only in the lowest bit.
+void test_neighbouring_seeds_give_different_kits() {
+  auto a = std::make_unique<DrumKit>();
+  auto b = std::make_unique<DrumKit>();
+  for (uint32_t seed = 0; seed < 200; ++seed) {
+    a->init(seed);
+    b->init(seed + 1);
+    for (int v = 0; v < kVoiceCount; ++v) {
+      a->trigger((Voice)v);
+      b->trigger((Voice)v);
+    }
+    char message[40];
+    snprintf(message, sizeof(message), "seeds %u and %u", (unsigned)seed, (unsigned)seed + 1);
+    TEST_ASSERT_FALSE_MESSAGE(renderUntilSilent(*a) == renderUntilSilent(*b), message);
+  }
+}
+
 // Analog feel: repeated hits of one drum are close but not identical.
 void test_repeated_hits_vary_slightly() {
   auto kit = std::make_unique<DrumKit>();
@@ -204,6 +221,7 @@ int main() {
   RUN_TEST(test_every_sound_is_audible_and_ends);
   RUN_TEST(test_same_seed_gives_the_same_sound);
   RUN_TEST(test_different_seeds_give_different_sounds);
+  RUN_TEST(test_neighbouring_seeds_give_different_kits);
   RUN_TEST(test_repeated_hits_vary_slightly);
   RUN_TEST(test_loud_mix_is_limited_without_wrapping);
   return UNITY_END();

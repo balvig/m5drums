@@ -32,6 +32,21 @@ inline float sine(float turns) {
 }
 
 // --- Random helpers (xorshift32) ---
+// Starting state for the generator from a kit seed. Scrambles the seed so
+// that neighbouring seeds give unrelated kits, and every seed its own: the
+// steps are all reversible, so different seeds give different states. (The
+// one seed that would give 0, which xorshift cannot start from, shares a
+// state with one other.)
+uint32_t stateForSeed(uint32_t seed) {
+  uint32_t h = seed + 0x9E3779B9u;
+  h ^= h >> 16;
+  h *= 0x85EBCA6Bu;
+  h ^= h >> 13;
+  h *= 0xC2B2AE35u;
+  h ^= h >> 16;
+  return h ? h : 0x9E3779B9u;
+}
+
 uint32_t nextRandom(uint32_t& rng) {
   rng ^= rng << 13;
   rng ^= rng >> 17;
@@ -342,7 +357,7 @@ const char* laneName(Family f, int lane) {
 }
 
 void familiesForSeed(uint32_t seed, Family out[kVoiceCount]) {
-  uint32_t rng = seed | 1;
+  uint32_t rng = stateForSeed(seed);
   pickFamilies(rng, out);
 }
 
@@ -567,7 +582,7 @@ float Drum::next() {
 
 void DrumKit::init(uint32_t seed) {
   buildSineTable();
-  uint32_t rng = seed | 1;  // xorshift must not start at 0
+  uint32_t rng = stateForSeed(seed);
   Family families[kVoiceCount];
   pickFamilies(rng, families);
 
