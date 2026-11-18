@@ -6,9 +6,10 @@ namespace storage {
 
 namespace {
 
-constexpr uint8_t kVersion = 4;
-constexpr size_t kVersion1Size = 60;  // version 1 had no third lane
-constexpr size_t kVersion2Size = 84;  // version 2 had no evolve settings
+// Bump this whenever the Session layout or the meaning of a kit seed changes.
+// A save with any other version is ignored and the device starts fresh;
+// older saves are deliberately not converted.
+constexpr uint8_t kVersion = 7;
 const char* const kNamespace = "m5drums";
 const char* const kKey = "session";
 
@@ -20,10 +21,8 @@ struct Session {
   uint8_t pattern[Sequencer::kTracks];
   int8_t pitch[Sequencer::kTracks][Sequencer::kSteps];
   int8_t decay[Sequencer::kTracks][Sequencer::kSteps];
-  int8_t shape[Sequencer::kTracks][Sequencer::kSteps];  // added in version 2
-  uint8_t evolveTheme;  // added in version 3 (as a bar count; a theme since version 4)
-  uint8_t unused[2];    // version 3 kept an evolve depth and seed here
-  // New fields go at the end, with a new version and size check in load().
+  int8_t shape[Sequencer::kTracks][Sequencer::kSteps];
+  uint8_t evolveTheme;
 };
 
 }  // namespace
@@ -34,17 +33,10 @@ bool load(Sequencer& seq) {
   // Opened read-write: a read-only open logs an error on first boot, when the
   // namespace does not exist yet.
   if (!prefs.begin(kNamespace, false)) return false;
-  size_t size = prefs.getBytesLength(kKey);
-  bool ok = size > 0 && size <= sizeof(s) && prefs.getBytes(kKey, &s, size) == size &&
-            (((s.version == kVersion || s.version == 3) && size == sizeof(s)) ||
-             (s.version == 2 && size == kVersion2Size) ||
-             (s.version == 1 && size == kVersion1Size));
+  bool ok = prefs.getBytesLength(kKey) == sizeof(s) &&
+            prefs.getBytes(kKey, &s, sizeof(s)) == sizeof(s) && s.version == kVersion;
   prefs.end();
   if (!ok) return false;
-  // Older saves: fields they lack read as whatever followed, so set them.
-  if (s.version < 2) memset(s.shape, 0, sizeof(s.shape));
-  if (s.version < 3) s.evolveTheme = 0;
-  if (s.version == 3) s.evolveTheme = s.evolveTheme ? 1 : 0;  // was on: first theme
 
   seq.init(s.kitSeed);
   seq.setTempo(s.bpm);

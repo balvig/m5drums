@@ -45,12 +45,24 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
 
 - 8 steps (16th notes, so half a bar) x 3 parts: A, B and C
 - Sounds are synthesised in code (virtual analog), not sample playback:
-  - one voice engine (oscillator with pitch sweep + FM + filtered noise),
-    used in different proportions by four instruments: PEW (sine with a
-    falling pitch), NOISE (filtered noise over an optional tone), METAL (FM)
-    and BLIP (square or triangle with a small bend)
-  - a kit is three different instruments out of the four, each with random
-    settings. The worst-case kit renders 1 s of audio in about 140 ms.
+  - the aim is analog drum machine character, not FM or metallic timbres
+  - instruments in voices.cpp, each a different recipe. In the draw: PEW
+    (sine with a falling pitch), NOISE (filtered noise over an optional
+    tone), BLIP (square or triangle with a small bend), KICK (low sine, fast
+    drop, click, drive), CLAP (band-passed noise in a few bursts), TOM (round
+    sine with a gentle sag and warmth), SNARE (tuned body plus snappy noise),
+    RIM (very short high tick). Implemented but left out of the draw: METAL
+    (FM) and COWBELL (two detuned squares), both judged too metallic, and
+    PLUCK (Karplus-Strong string) and ACID (resonant saw), held back until
+    there is a plan for pitched sounds.
+  - a kit is three different instruments from the draw, each with random
+    settings, generated from a seed
+  - analog feel: each hit's pitch wanders about 0.5 % and its level a few
+    percent at random, and the mix is soft-clipped rather than hard-limited
+  - no backwards compatibility for saved sessions: when the session layout
+    or what a seed produces changes, bump kVersion in storage.cpp and old
+    saves are simply ignored (the device starts fresh)
+  - the worst-case kit renders 1 s of audio in about 190 ms on the device
   - sines come from a lookup table, not sinf()
 - Screen shows a top row (MENU button, battery icon, play state), then
   a 3-row x 8-column grid, a cursor, and a moving playhead
@@ -78,7 +90,9 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   screen. Pitch (+/-18 semitones; on NOISE it is brightness), decay (+/-12,
   4 = double/half length), and a third "shape" lane (+/-8, 4 = double/half)
   that is the instrument's own: PEW sweep depth, NOISE tone body, METAL FM
-  amount, BLIP bend depth.
+  amount, BLIP bend depth, KICK drive, CLAP spread between bursts, PLUCK
+  brightness, COWBELL detune, ACID filter envelope depth, TOM pitch sag,
+  SNARE snap (noise level), RIM click (noise level).
 - MENU (top left, the only cell of the top row): B opens a drop-down list.
   A/C move up/down, B selects, B long press closes.
   - TEMPO (40-240 BPM) and SWING (50-75 %, MPC style: 50 is straight): B
