@@ -40,19 +40,66 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   dependencies). It takes the firmware to about 1.4 MB, hence
   `board_build.partitions = default_16MB.csv`.
 - Build: `pio run`. Flash: `pio run -t upload`. Logs: `pio device monitor`.
-- Tests: `pio test -e native`. They build voices.cpp, sequencer.cpp and
-  storage.cpp for this computer (no device needed) and take a few seconds.
-  Suites are in `test/test_*`; `test/support` has shared helpers and an
-  in-memory stand-in for the ESP32's `Preferences.h`. Run them after any
-  change to those three files. Anything that touches hardware (buttons,
-  display, audio outputs, Bluetooth, SD export) is only checked on the device.
+- Tests: `pio test -e native`, on this computer, no device, a few seconds.
+  They cover everything in `lib/`. Run them after any change there.
+- Simulator: `pio run -e sim` builds the screens for this computer and takes
+  every picture again into `sim/shots` (see "Simulator" below). Needs SDL2
+  (`brew install sdl2`). `.pio/build/sim/program` opens a window.
+
+## Where things are
+
+Laid out as in `../sketchbox-m5`, which this approach comes from.
+
+| | |
+|---|---|
+| `lib/drums` | Plain C++, no hardware, all tested: the sounds (`voices`), the `sequencer`, the saved `session` as bytes, the `wav` header and export length |
+| `lib/controls` | `gestures.h`: what presses of the three buttons mean, given which are down and the time. Plain C++, tested |
+| `src/ui.cpp` | The screens, and what the gestures do on them. Runs on the device and in the simulator, so it may only touch hardware through `M5`, `storage`, `bluetooth` and `exporter` |
+| `src/main.cpp` | Hardware set-up and the main loop |
+| `src/` the rest | `audio`, `lineout`, `bluetooth`, `storage` (NVS), `exporter` (SD card): device only |
+| `test/` | One suite per piece of `lib/`; `test/support/helpers.h` is shared |
+| `sim/` | The simulator: `sim_main.cpp` (made-up world, scenes, window), `shim/` (stand-ins for Arduino and M5Unified), `after_build.py` (the pictures), `shots/` (the pictures, committed on purpose) |
+
+Anything else worth testing has to be pulled out of the Arduino code into
+`lib/` first. Not tested: drawing (that is what the pictures are for), audio
+output, Bluetooth, the SD card.
+
+The device's compiler is older than the computer's (no C++17): code in
+`lib/` has to build with both, so build the firmware as well as the tests.
+
+## Simulator
+
+`src/ui.cpp` is built with the real display library (M5GFX, drawing into an
+SDL window) and the real sequencer; the battery, Bluetooth, SD card and
+flash are made up in `sim/sim_main.cpp`. Time only moves when the simulator
+moves it, 20 ms a frame, and the sequencer is rendered by that much each
+frame, so the same presses always give the same picture.
+
+- After any change to `src/ui.cpp`: `pio run -e sim`, then look at the
+  pictures that should have changed (`sim/shots/index.html` has all of them
+  on one page). Add a scene to `kScenes` for any new state of a screen.
+- A scene is a name, an optional change to the made-up world, and button
+  presses as letters (listed at `struct Scene`). The presses go through the
+  real gesture code with realistic timing. The name's first word is its
+  group on the page; a new group must be added to `sim/after_build.py`.
+- `SIM_FRAMES=n .pio/build/sim/program shot <scene> <dir>` takes one picture
+  n frames later, to catch something moving.
+- The window plays sound and takes the arrow keys as the three buttons
+  (left, down, right; they can be held and combined). B battery, T
+  Bluetooth, E what the next export does, S saves a picture.
+- It cannot show the panel's real colours, how the buttons feel, how the
+  device sounds, or anything the real Bluetooth, card or flash code does.
+- Found with the first set of pictures (21 Nov 2026) and fixed: a lit hit
+  and playhead mark left behind beside the open menu, and after closing
+  HELP while playing. Found and not fixed: three lines of HELP run off the
+  right edge.
 
 ## Design
 
 - 8 steps (16th notes, so half a bar) x 3 parts: A, B and C
 - Sounds are synthesised in code (virtual analog), not sample playback:
   - the aim is analog drum machine character, not FM or metallic timbres
-  - instruments in voices.cpp, each a different recipe. In the draw: PEW
+  - instruments in lib/drums/voices.cpp, each a different recipe. In the draw: PEW
     (sine with a falling pitch), NOISE (filtered noise over an optional
     tone), BLIP (square or triangle with a small bend), KICK (low sine, fast
     drop, click, drive), CLAP (band-passed noise in a few bursts), TOM (round
@@ -66,7 +113,7 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   - analog feel: each hit's pitch wanders about 0.5 % and its level a few
     percent at random, and the mix is soft-clipped rather than hard-limited
   - no backwards compatibility for saved sessions: when the session layout
-    or what a seed produces changes, bump kVersion in storage.cpp and old
+    or what a seed produces changes, bump kVersion in lib/drums/session.h and old
     saves are simply ignored (the device starts fresh)
   - the worst-case kit renders 1 s of audio in about 190 ms on the device
   - sines come from a lookup table, not sinf()
@@ -108,7 +155,7 @@ pin table; use `M5.getPin(m5::pin_name_t::sd_spi_cs)`).
   - EVOLVE (off, or a named theme): over a fixed 8-bar phrase the pattern
     moves away from what is set and is home again when the phrase restarts.
     The first pass is always exactly as set and stored values are never
-    changed. Themes are a table in sequencer.cpp: a 16-pass curve, how far
+    changed. Themes are a table in lib/drums/sequencer.cpp: a 16-pass curve, how far
     each lane moves, whether hits move together or each in its own
     direction, volume spread, and chances of dropped hits, extra ghost hits
     and rolls, plus a sample-rate crush on the output. Themes: DRIFT, BUILD,

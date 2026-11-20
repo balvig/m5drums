@@ -4,42 +4,17 @@
 #include <SD.h>
 #include <SPI.h>
 
+#include "wav.h"
+
 namespace exporter {
 
 namespace {
 
-constexpr int kRepeats = 4;  // passes of the pattern written when evolve is off
 constexpr uint32_t kMaxTailSamples = voices::kSampleRate * 4;
 constexpr size_t kChunkSamples = 512;
-constexpr size_t kHeaderSize = 44;
 
 Sequencer offline;  // a private copy, rendered as fast as possible
 int16_t chunk[kChunkSamples];
-
-void put16(uint8_t* p, uint16_t v) {
-  p[0] = v;
-  p[1] = v >> 8;
-}
-void put32(uint8_t* p, uint32_t v) {
-  put16(p, v);
-  put16(p + 2, v >> 16);
-}
-
-// Canonical 44-byte header for 16-bit mono PCM.
-void buildHeader(uint8_t* h, uint32_t dataBytes) {
-  memcpy(h, "RIFF", 4);
-  put32(h + 4, 36 + dataBytes);
-  memcpy(h + 8, "WAVEfmt ", 8);
-  put32(h + 16, 16);                       // fmt chunk size
-  put16(h + 20, 1);                        // PCM
-  put16(h + 22, 1);                        // mono
-  put32(h + 24, voices::kSampleRate);
-  put32(h + 28, voices::kSampleRate * 2);  // bytes per second
-  put16(h + 32, 2);                        // bytes per frame
-  put16(h + 34, 16);                       // bits per sample
-  memcpy(h + 36, "data", 4);
-  put32(h + 40, dataBytes);
-}
 
 // Renders and writes n samples. Returns false if the card stops accepting data.
 bool writeSamples(File& file, uint32_t n) {
@@ -55,19 +30,15 @@ bool writeSamples(File& file, uint32_t n) {
 }
 
 Result writeFile(File& file, const Sequencer& live) {
-  uint8_t header[kHeaderSize] = {};
-  if (file.write(header, kHeaderSize) != kHeaderSize) return kWriteFailed;  // filled in at the end
+  uint8_t header[wav::kHeaderSize] = {};
+  if (file.write(header, wav::kHeaderSize) != wav::kHeaderSize) return kWriteFailed;  // filled in at the end
 
   offline.copyFrom(live);
   offline.setPlaying(true);
 
-  // The pattern is 4 pairs of 16th notes; this matches the sequencer's own
-  // timing sample for sample, so the body ends exactly on the loop point.
-  uint32_t pairSamples = voices::kSampleRate * 30u / live.tempo();
   // With evolve on, one whole phrase: the offline copy starts at the first
   // pass, as live playback does, and evolves identically.
-  int passes = live.evolvePasses() > 0 ? live.evolvePasses() : kRepeats;
-  uint32_t bodySamples = passes * (Sequencer::kSteps / 2) * pairSamples;
+  uint32_t bodySamples = wav::bodySamples(live);
   if (!writeSamples(file, bodySamples)) return kWriteFailed;
 
   // Stop and let the last hits ring out.
@@ -79,8 +50,8 @@ Result writeFile(File& file, const Sequencer& live) {
     if (!offline.hasAudio()) break;
   }
 
-  buildHeader(header, (bodySamples + tailSamples) * sizeof(int16_t));
-  if (!file.seek(0) || file.write(header, kHeaderSize) != kHeaderSize) return kWriteFailed;
+  wav::buildHeader(header, (bodySamples + tailSamples) * sizeof(int16_t));
+  if (!file.seek(0) || file.write(header, wav::kHeaderSize) != wav::kHeaderSize) return kWriteFailed;
   return kOk;
 }
 

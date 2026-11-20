@@ -14,3 +14,6 @@
 
 # Recordings copied off the SD card
 *.wav
+
+# Pictures saved from the simulator's window with S (sim/shots is kept on purpose)
+sim-picture-*.png

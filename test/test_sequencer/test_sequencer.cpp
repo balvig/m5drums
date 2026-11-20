@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "helpers.h"
+#include "sequencer.h"
 
 namespace {
 

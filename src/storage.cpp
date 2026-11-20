@@ -2,76 +2,37 @@
 
 #include <Preferences.h>
 
+#include "session.h"
+
 namespace storage {
 
 namespace {
 
-// Bump this whenever the Session layout or the meaning of a kit seed changes.
-// A save with any other version is ignored and the device starts fresh;
-// older saves are deliberately not converted.
-constexpr uint8_t kVersion = 8;
 const char* const kNamespace = "m5drums";
 const char* const kKey = "session";
-
-struct Session {
-  uint8_t version;
-  uint8_t swing;
-  uint16_t bpm;
-  uint32_t kitSeed;
-  uint8_t pattern[Sequencer::kTracks];
-  int8_t pitch[Sequencer::kTracks][Sequencer::kSteps];
-  int8_t decay[Sequencer::kTracks][Sequencer::kSteps];
-  int8_t shape[Sequencer::kTracks][Sequencer::kSteps];
-  uint8_t evolveTheme;
-};
 
 }  // namespace
 
 bool load(Sequencer& seq) {
-  Session s = {};
+  uint8_t bytes[session::kBytes];
   Preferences prefs;
   // Opened read-write: a read-only open logs an error on first boot, when the
   // namespace does not exist yet.
   if (!prefs.begin(kNamespace, false)) return false;
-  bool ok = prefs.getBytesLength(kKey) == sizeof(s) &&
-            prefs.getBytes(kKey, &s, sizeof(s)) == sizeof(s) && s.version == kVersion;
+  bool ok = prefs.getBytesLength(kKey) == sizeof(bytes) &&
+            prefs.getBytes(kKey, bytes, sizeof(bytes)) == sizeof(bytes);
   prefs.end();
-  if (!ok) return false;
-
-  seq.init(s.kitSeed);
-  seq.setTempo(s.bpm);
-  seq.setSwing(s.swing);
-  seq.setEvolveTheme(s.evolveTheme);
-  for (int t = 0; t < Sequencer::kTracks; ++t) {
-    seq.setPattern(t, s.pattern[t]);
-    for (int st = 0; st < Sequencer::kSteps; ++st) {
-      seq.setStepPitch(t, st, s.pitch[t][st]);
-      seq.setStepDecay(t, st, s.decay[t][st]);
-      seq.setStepShape(t, st, s.shape[t][st]);
-    }
-  }
-  return true;
+  // A save from another version of the session layout is refused here.
+  return ok && session::unpack(bytes, sizeof(bytes), seq);
 }
 
 void save(const Sequencer& seq) {
-  Session s = {};
-  s.version = kVersion;
-  s.swing = seq.swing();
-  s.bpm = seq.tempo();
-  s.kitSeed = seq.kitSeed();
-  s.evolveTheme = seq.evolveTheme();
-  for (int t = 0; t < Sequencer::kTracks; ++t) {
-    s.pattern[t] = seq.pattern(t);
-    for (int st = 0; st < Sequencer::kSteps; ++st) {
-      s.pitch[t][st] = seq.stepPitch(t, st);
-      s.decay[t][st] = seq.stepDecay(t, st);
-      s.shape[t][st] = seq.stepShape(t, st);
-    }
-  }
+  uint8_t bytes[session::kBytes];
+  session::pack(seq, bytes);
 
   Preferences prefs;
   if (!prefs.begin(kNamespace, false)) return;
-  prefs.putBytes(kKey, &s, sizeof(s));
+  prefs.putBytes(kKey, bytes, sizeof(bytes));
   prefs.end();
 }
 
