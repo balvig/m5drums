@@ -38,6 +38,8 @@ constexpr int kShapeRange = 8;   // +/- levels; every 4 doubles or halves the am
 const char* familyName(Family f);
 // Three-letter name of a lane (0 = pitch, 1 = decay, 2 = shape) on an instrument.
 const char* laneName(Family f, int lane);
+// The same in full, 8 letters at most: PITCH, DECAY, SWEEP...
+const char* laneFullName(Family f, int lane);
 // The instruments a seed gives the three voices, without building the kit.
 void familiesForSeed(uint32_t seed, Family out[kVoiceCount]);
 

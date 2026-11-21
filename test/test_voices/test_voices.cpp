@@ -79,7 +79,13 @@ void test_every_instrument_and_lane_has_a_name() {
     for (int lane = 0; lane < kLaneCount; ++lane) {
       const char* name = laneName((Family)f, lane);
       TEST_ASSERT_NOT_NULL(name);
-      TEST_ASSERT_TRUE(strlen(name) >= 2 && strlen(name) <= 3);  // fits the detail screen
+      TEST_ASSERT_TRUE(strlen(name) >= 2 && strlen(name) <= 3);  // fits beside the grid
+      // The full name is a word of its own (FM aside) that starts the same way
+      // and fits the bottom bar's button with " STEP 8" after it.
+      const char* full = laneFullName((Family)f, lane);
+      TEST_ASSERT_TRUE_MESSAGE(strlen(full) <= 8, full);
+      TEST_ASSERT_TRUE_MESSAGE(strcmp(name, "FM") == 0 || strlen(full) > strlen(name), full);
+      TEST_ASSERT_EQUAL_MESSAGE(name[0], full[0], full);
     }
   }
 }

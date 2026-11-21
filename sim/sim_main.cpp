@@ -40,6 +40,9 @@ bool restored = true;  // false: start as the device does with nothing saved
 bluetooth::State bluetoothState = bluetooth::kOff;
 uint32_t bluetoothSince = 0;
 exporter::Result exportResult = exporter::kOk;
+bool formatWorks = true;     // what formatting the made-up card comes to
+bool stopAtFormat = false;   // take the scene's picture while the card is being formatted
+void pictureAndLeave();
 int exports = 6;  // files already on the made-up card
 
 uint32_t randomState = 0x2545F491u;
@@ -99,6 +102,13 @@ namespace exporter {
 Result exportWav(const Sequencer&, char* name, size_t nameSize) {
   if (sim::exportResult == kOk) snprintf(name, nameSize, "drums%03d.wav", ++sim::exports);
   return sim::exportResult;
+}
+bool formatCard() {
+  // On the device nothing moves while this runs. The picture of that moment
+  // has to be taken from in here.
+  if (sim::stopAtFormat) sim::pictureAndLeave();
+  if (sim::formatWorks) sim::exportResult = kOk;
+  return sim::formatWorks;
 }
 }  // namespace exporter
 
@@ -189,14 +199,15 @@ struct Scene {
   const char* name;
   void (*arrange)();    // changes to the made-up world, or nullptr
   const char* presses;  // a, b, c: tap left, middle, right; A, C: hold left, right for 1 s;
-                        // h: hold middle; d, u: a row down, up; p: play / stop;
-                        // w: wait 1 s; .: wait 0.1 s
+                        // h: hold middle (open drum / back); d, u: a row down, up;
+                        // p: left and right held (play / stop); w: wait 1 s; .: wait 0.1 s
 };
 
-// To the menu from where a scene starts (the first drum's row): up a row to
-// the MENU button, then enter. Its items: NEW, TEMPO, SWING, EVOLVE,
-// BLUETOOTH, EXPORT, HELP, CLOSE.
+// Every scene starts on the first step of drum A. To the menu from there: up
+// a row to the MENU button, then enter. Its rows: TEMPO, SWING, EVOLVE,
+// BLUETOOTH, EXPORT, NEW, HELP.
 #define MENU "ub"
+#define EXPORT MENU "ccccb"
 
 const Scene kScenes[] = {
     {"main", nullptr, ""},
@@ -216,7 +227,7 @@ const Scene kScenes[] = {
     {"main-battery-empty", [] { M5.Power.level = 0; }, ""},
     {"main-charging", [] { M5.Power.level = 50; M5.Power.charging = true; }, ""},
     {"main-no-battery-reading", [] { M5.Power.level = -1; }, ""},
-    {"main-after-new", nullptr, MENU "bb"},
+    {"main-after-new", nullptr, MENU "cccccbb"},
     {"drum", nullptr, "h"},
     {"drum-b", nullptr, "dh"},
     {"drum-c", nullptr, "ddh"},
@@ -224,42 +235,59 @@ const Scene kScenes[] = {
     {"drum-on-shape", nullptr, "hdd"},
     {"drum-cursor-moved", nullptr, "hcccc"},
     {"drum-editing", nullptr, "hb"},
-    {"drum-editing-raised", nullptr, "hbC"},
-    {"drum-editing-lowered", nullptr, "hbA"},
-    {"drum-edited", nullptr, "hbCb"},
+    {"drum-editing-raised", nullptr, "hccccbC"},
+    {"drum-editing-lowered", nullptr, "hccccbA"},
+    {"drum-edited", nullptr, "hccccbCb"},
     {"drum-playing", nullptr, "hpw"},
     {"drum-playing-further", nullptr, "hpw.."},
     {"drum-on-menu-button", nullptr, "hu"},
     {"drum-back-out", nullptr, "dhh"},
     {"menu", nullptr, MENU},
-    {"menu-on-tempo", nullptr, MENU "c"},
-    {"menu-tempo-editing", nullptr, MENU "cb"},
-    {"menu-tempo-raised", nullptr, MENU "cbC"},
-    {"menu-swing-editing", nullptr, MENU "ccbccc"},
-    {"menu-evolve-picked", nullptr, MENU "cccbccc"},
-    {"menu-new-are-you-sure", nullptr, MENU "b"},
-    {"menu-new-moved-away", nullptr, MENU "bc"},
-    {"menu-bluetooth-searching", nullptr, MENU "ccccb"},
-    {"menu-bluetooth-connecting", nullptr, MENU "ccccbww."},
-    {"menu-bluetooth-connected", nullptr, MENU "ccccbwwww"},
-    {"menu-bluetooth-restarting", nullptr, MENU "ccccbwwwwb"},
-    {"menu-export-saved", nullptr, MENU "cccccb"},
-    {"menu-export-no-card", [] { exportResult = exporter::kNoCard; }, MENU "cccccb"},
-    {"menu-export-failed", [] { exportResult = exporter::kWriteFailed; }, MENU "cccccb"},
-    {"menu-on-close", nullptr, MENU "a"},
-    {"menu-closed", nullptr, MENU "ab"},
-    {"menu-closed-by-holding", nullptr, MENU "cch"},
-    {"menu-while-playing", nullptr, "p" MENU "w.."},
-    {"menu-while-playing-further", nullptr, "p" MENU "w...."},
-    {"menu-message-while-playing", nullptr, "p" MENU "cccccbw."},
-    {"menu-closed-while-playing", nullptr, "p" MENU "w.h."},
-    {"menu-over-a-drum", nullptr, "hu" "b"},
-    {"help", nullptr, MENU "ccccccb"},
-    {"help-closed", nullptr, MENU "ccccccbb"},
-    {"help-closed-while-playing", nullptr, "p" MENU "ccccccbwb.."},
+    {"menu-on-swing", nullptr, MENU "c"},
+    {"menu-tempo-picked", nullptr, MENU "b"},
+    {"menu-tempo-raised", nullptr, MENU "bC"},
+    {"menu-tempo-done", nullptr, MENU "bCb"},
+    {"menu-swing-picked", nullptr, MENU "cbccc"},
+    {"menu-evolve-picked", nullptr, MENU "ccbccc"},
+    {"menu-bluetooth-searching", nullptr, MENU "cccb"},
+    {"menu-bluetooth-connecting", nullptr, MENU "cccbww."},
+    {"menu-bluetooth-connected", nullptr, MENU "cccbwwww"},
+    {"menu-bluetooth-restarting", nullptr, MENU "cccbwwwwb"},
+    {"menu-export-saved", nullptr, EXPORT},
+    {"menu-export-no-card", [] { exportResult = exporter::kNoCard; }, EXPORT},
+    {"menu-export-failed", [] { exportResult = exporter::kWriteFailed; }, EXPORT},
+    {"menu-export-moved-away", nullptr, EXPORT "c"},
+    // A card that cannot be read: the export asks whether to format it.
+    {"menu-card-question", [] { exportResult = exporter::kUnreadable; }, EXPORT},
+    {"menu-card-question-too-soon", [] { exportResult = exporter::kUnreadable; }, EXPORT "c"},
+    {"menu-card-question-no", [] { exportResult = exporter::kUnreadable; }, EXPORT "wa"},
+    {"menu-card-question-put-away", [] { exportResult = exporter::kUnreadable; }, EXPORT "wb"},
+    {"menu-card-formatting", [] { exportResult = exporter::kUnreadable; stopAtFormat = true; }, EXPORT "wc"},
+    {"menu-card-formatted-and-exported", [] { exportResult = exporter::kUnreadable; }, EXPORT "wc"},
+    {"menu-card-could-not-format", [] { exportResult = exporter::kUnreadable; formatWorks = false; }, EXPORT "wc"},
+    {"menu-new-are-you-sure", nullptr, MENU "cccccb"},
+    {"menu-new-moved-away", nullptr, MENU "cccccba"},
+    {"menu-help", nullptr, MENU "ab"},
+    {"menu-help-closed", nullptr, MENU "abb"},
+    {"menu-closed", nullptr, MENU "cch"},
+    {"menu-closed-from-a-picked-value", nullptr, MENU "bhh"},
+    {"menu-playing", [] { seq.setEvolveTheme(3); }, "p" MENU "ww"},
+    {"menu-closed-while-playing", nullptr, "p" MENU "wh.."},
+    {"menu-over-a-drum", nullptr, "hub"},
+    {"menu-closed-over-a-drum", nullptr, "hubh"},
 };
 
+std::string picturePath;
+
+void pictureAndLeave() {
+  bool ok = savePicture(picturePath);
+  printf("%s %s\n", ok ? "saved" : "FAILED", picturePath.c_str());
+  fflush(stdout);
+  _exit(ok ? 0 : 1);
+}
+
 int shoot(const Scene& scene, const std::string& folder) {
+  picturePath = folder + "/" + scene.name + ".png";
   basePattern();
   if (scene.arrange) scene.arrange();
   ui::begin(seq, restored);
@@ -324,8 +352,10 @@ int live(bool* running) {
           bluetoothSince = clockMs + 3600000;  // stays there until T is pressed again
           break;
         case SDL_SCANCODE_E:
-          exportResult = (exporter::Result)((exportResult + 1) % 3);
-          printf("the next export: %s\n", exportResult == exporter::kOk ? "works" : exportResult == exporter::kNoCard ? "no card" : "write fails");
+          exportResult = (exporter::Result)((exportResult + 1) % 4);
+          printf("the next export: %s\n", exportResult == exporter::kOk ? "works"
+                                           : exportResult == exporter::kNoCard ? "no card"
+                                           : exportResult == exporter::kUnreadable ? "the card cannot be read" : "write fails");
           break;
         case SDL_SCANCODE_S: {
           char name[40];

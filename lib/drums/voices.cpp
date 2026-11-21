@@ -1,6 +1,7 @@
 #include "voices.h"
 
 #include <math.h>
+#include <string.h>
 
 namespace voices {
 
@@ -354,6 +355,23 @@ const char* laneName(Family f, int lane) {
       {"PIT", "DEC", "CLK"},  // RIM: click (noise level)
   };
   return kNames[f][lane];
+}
+
+const char* laneFullName(Family f, int lane) {
+  struct Pair {
+    const char* brief;
+    const char* full;
+  };
+  static const Pair kFull[] = {
+      {"PIT", "PITCH"},  {"DEC", "DECAY"}, {"TON", "TONE"},   {"SWP", "SWEEP"},  {"BDY", "BODY"},
+      {"FM", "FM"},      {"BND", "BEND"},  {"DRV", "DRIVE"},  {"SPR", "SPREAD"}, {"BRT", "BRIGHT"},
+      {"DTN", "DETUNE"}, {"ENV", "ENVELOPE"}, {"SNP", "SNAP"}, {"CLK", "CLICK"},
+  };
+  const char* brief = laneName(f, lane);
+  for (const Pair& pair : kFull) {
+    if (strcmp(pair.brief, brief) == 0) return pair.full;
+  }
+  return brief;
 }
 
 void familiesForSeed(uint32_t seed, Family out[kVoiceCount]) {

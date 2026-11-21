@@ -33,7 +33,7 @@ figcaption { margin-top:6px; color:var(--dim); font-size:13px; }
 Made again each time that code changes. Colours on the real panel differ a little.</p></header>
 """
 
-GROUPS = [("main", "Main screen"), ("drum", "A drum's detail screen"), ("menu", "Menu"), ("help", "Help")]
+GROUPS = [("main", "Main screen"), ("drum", "A drum, open"), ("menu", "MENU")]
 
 
 def take_pictures(source, target, env):

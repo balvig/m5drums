@@ -2,7 +2,7 @@
 // it is given which buttons are down and the time, and calls back with what
 // to do, so it is tested on a computer (test/test_gestures).
 //
-//   left / right  tapped: one step that way (while the other is held: a row)
+//   left / right  tapped: one step that way
 //                 held left, then right tapped: down a row
 //                 held right, then left tapped: up a row
 //                 both held for a moment: play / stop
@@ -20,13 +20,13 @@
 // What the gestures act on: the screens.
 class GestureTarget {
  public:
-  // The cursor is on the grid: no menu, help page or value being changed.
+  // The cursor is on the grid: no menu, and no value being changed.
   virtual bool onGrid() = 0;
   virtual bool changingValue() = 0;
   // One step left (-1) or right (+1): the cursor, the menu's marker, or the
   // value being changed. False if nothing changed.
   virtual bool step(int direction) = 0;
-  // Up (-1) or down (+1) a row.
+  // Up (-1) or down (+1) a row of the grid.
   virtual void row(int direction) = 0;
   virtual void playStop() = 0;
   virtual void enter() = 0;

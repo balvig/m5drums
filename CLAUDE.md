@@ -92,7 +92,7 @@ frame, so the same presses always give the same picture.
 - Found with the first set of pictures (21 Nov 2026) and fixed: a lit hit
   and playhead mark left behind beside the open menu, and after closing
   HELP while playing. Found and not fixed: three lines of HELP run off the
-  right edge.
+  right edge (that page has since gone).
 
 ## Design
 
@@ -117,41 +117,58 @@ frame, so the same presses always give the same picture.
     saves are simply ignored (the device starts fresh)
   - the worst-case kit renders 1 s of audio in about 190 ms on the device
   - sines come from a lookup table, not sinf()
-- Screen shows a top row (MENU button, battery icon, play state), then
-  a 3-row x 8-column grid, a cursor, and a moving playhead
+- The sequencer is one screen: a MENU button top left, then a 3-row x
+  8-column grid, a cursor that goes anywhere on it, and a moving playhead.
+  Holding B on a drum's row opens that drum: the three rows are then its
+  lanes, with a strip above naming the drum and its instrument. The steps
+  are the same size and in the same place either way; the strip's space is
+  empty on the main screen.
+- A bar along the top has the MENU button, the evolve phrase, play/stop and
+  the battery (rightmost). A bar along the bottom says what the buttons do:
+  left and right at the sides, and in the middle what the cursor is on (the
+  drum and its instrument, the lane's name in full, MENU, or the menu's
+  row), in a border one level in and on orange while a value is changed.
+- With a drum open, the step under the cursor shows its value as a small
+  number in the cell, orange while it is being changed.
+- MENU opens a page in place of the grid, a list in the manner of
+  `../sketchbox-m5`: label on the left, value on the right, an orange mark
+  beside the chosen row, the other rows faint while a value is changed.
 - Controls (A, B, C are the left, middle and right buttons):
   - A / C tapped: cursor left / right within the row, wrapping. On the grid
     they act on release and do nothing while held, because a held button is
-    the shift for the other. In the menu (up / down) and while editing a
+    the shift for the other. In the menu (up / down) and while changing a
     value (lower / raise) they act on press and repeat while held.
   - A held, then C pressed and let go: down a row. C held, then A pressed
     and let go: up a row. Wrapping (MENU, then the three drums or lanes).
     The row changes when either button is released.
   - A and C both held for 0.45 s: play/stop, with no cursor movement.
-  - In the menu and while editing, a press of A or C waits 45 ms before
-    acting, so that a pair pressed together (play/stop) is recognised first.
-  - B tapped: "enter". On a step, toggle it; on MENU, open the menu; in a
-    drum's detail screen, start or finish editing the value; in the menu,
-    select.
+  - In the menu and while changing a value, a press of A or C waits 45 ms
+    before acting, so that a pair pressed together (play/stop) is
+    recognised first.
+  - B tapped: "enter". On a step, toggle it; on MENU, open the menu; with a
+    drum open, start or finish changing the value; in the menu, pick the
+    row's value to change, or do what the row says.
   - B held on its own for 0.4 s (fires while still held): on a drum's row,
-    open that drum's detail screen, where the three rows are that
-    instrument's lanes; otherwise go back (out of the detail screen, menu or
-    help)
-  - Other arrangements tried along the way: one button as both enter and
+    open that drum; otherwise go back (out of the drum, a picked value,
+    help, or the menu).
+  - Tried on 21 Nov 2026 and dropped, all with pages switched by A / C and
+    levels entered with B: STEPS, MOD and SETUP; STEPS, MOD A, MOD B, MOD C
+    and SETUP; SEQUENCER and SETUP with the modulation reached from the
+    drum's name; left and right together as an instant play/stop; rows
+    other than the chosen one dimmed. Jens: too deep, and going straight
+    into a drum from the grid was quicker. Only the list look of the menu
+    was kept.
+  - Button arrangements tried before that: one button as both enter and
     shift (on A, on B, and on C); A as a row-shift for B and C.
-- Automation: every step stores three offsets, shown as bars in the detail
-  screen. Pitch (+/-18 semitones; on NOISE it is brightness), decay (+/-12,
+- Automation: every step stores three offsets, shown as bars when the drum
+  is open. Pitch (+/-18 semitones; on NOISE it is brightness), decay (+/-12,
   4 = double/half length), and a third "shape" lane (+/-8, 4 = double/half)
   that is the instrument's own: PEW sweep depth, NOISE tone body, METAL FM
   amount, BLIP bend depth, KICK drive, CLAP spread between bursts, PLUCK
   brightness, COWBELL detune, ACID filter envelope depth, TOM pitch sag,
   SNARE snap (noise level), RIM click (noise level).
-- MENU (top left, the only cell of the top row): B opens a drop-down list.
-  A/C move up/down, B selects, B long press closes.
-  - TEMPO (40-240 BPM) and SWING (50-75 %, MPC style: 50 is straight): B
-    enters edit mode, A/C change the value, B leaves
-  - NEW (select twice): empty pattern with three new random sounds
-    and a random tempo (80-170 BPM) and swing (50-66 %). Evolve goes to off.
+- The menu's rows:
+  - TEMPO (40-240 BPM) and SWING (50-75 %, MPC style: 50 is straight).
   - EVOLVE (off, or a named theme): over a fixed 8-bar phrase the pattern
     moves away from what is set and is home again when the phrase restarts.
     The first pass is always exactly as set and stored values are never
@@ -162,16 +179,28 @@ frame, so the same presses always give the same picture.
     WAVE, RISE, OPEN, FILL, GLITCH, MELT. There is no depth or seed to set;
     every random-looking choice is a hash of the kit seed, pass and step,
     so a phrase is identical every time and in exports. A row of 16
-    segments in the top row shows the position in the phrase.
+    segments in the top bar shows the position in the phrase.
   - BLUETOOTH: turns on A2DP and connects to the first audio
     device found; while connected, the Bluetooth stack pulls audio from the
     sequencer and the built-in speaker goes quiet. Selecting it again saves
     and restarts, which is the only way to turn it off.
-  - HELP: a page listing what the buttons do. Nothing about the controls
-    is shown on screen otherwise.
   - EXPORT: renders one evolve phrase (4 repeats of the pattern if
     evolve is off) plus the ring-out, offline,
-    to /drumsNNN.wav on the microSD card (16-bit mono, 44.1 kHz).
+    to /drumsNNN.wav on the microSD card (16-bit mono, 44.1 kHz). The file's
+    name, or what went wrong, shows on the row.
+    If a card is in the slot but cannot be read (not formatted, say), a
+    question takes the page, as in sketchbox-m5: CARD UNREADABLE / ERASE
+    AND FORMAT?, NO on the left button, YES on the right, the middle one
+    puts it away, and presses are ignored for its first second. YES formats
+    it (`exporter::formatCard`, the card library's format-if-empty option,
+    which leaves a readable card untouched; the screen stands still
+    meanwhile) and then goes on with the export. Not yet tried with a real
+    unformatted card on this device.
+  - NEW (select twice): empty pattern with three new random sounds
+    and a random tempo (80-170 BPM) and swing (50-66 %). Evolve goes to
+    off, and it lands on the first step of the first drum.
+  - HELP: a page listing what the buttons do, including the row moves and
+    play/stop, which the bottom bar does not say. B closes it.
 - The session (pattern, automation, tempo, swing, and the seed the sounds are
   generated from) is saved to NVS 2 s after the last change and restored at
   boot. Changing the random ranges in voices.cpp changes what a saved seed
